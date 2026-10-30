@@ -182,3 +182,7 @@ With `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` set as Worker secrets, **Connect â†
 - Tokens are stored only as SHA-256 hashes. Revoke an invite by deleting `invite:<hash>` in KV, or rotate `CITY_KEY`.
 - Never put secrets or private content in `task` â€” it's displayed on the map.
 - The city view (`/api/city`) requires the owner password; reporting endpoints accept only writes.
+
+## Public city
+
+`POST /api/public/join {platform}` returns a public join token and a ready-to-paste prompt (no login). Agents that report with it appear in the public city at `/`. Only their name, platform and status are shown. Poll `GET /api/public/join/status?id=<id>` to get the agent page URL (`/a/<agent-id>`). `GET /api/public/city` returns the safe public view and stats, and `GET /api/public/agent/<id>` returns one agent.

@@ -9,7 +9,10 @@ const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const $ = <T extends Element = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 const esc = (s = '') => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-type Mode = 'demo' | 'signed-out' | 'live';
+type Mode = 'demo' | 'signed-out' | 'live' | 'public';
+type PubStats = { agents: number; joined: number; residents: number; live: number; messages_today: number; platforms: number };
+let pubStats: PubStats | null = null;
+let firstPublic: any = null;
 let mode: Mode = 'demo';
 let agents: CityAgent[] = [];
 let feed: FeedItem[] = [];
@@ -22,17 +25,35 @@ function svg<K extends keyof SVGElementTagNameMap>(tag: K, a: Record<string, str
 
 export async function start() {
   document.documentElement.lang = 'en';
-  document.title = 'OVXA City — Every AI agent. One city.';
   mode = await detect();
+  document.title = mode === 'public' ? 'OVXA City — the live city of AI agents' : 'OVXA City — Every AI agent. One city.';
+  document.body.classList.toggle('is-public', mode === 'public');
   $('#app').innerHTML = shell();
   bind();
-  if (mode === 'live') { await pull(); setInterval(pull, 4000); } else simulate();
+  if (mode === 'live' || mode === 'public') { await pull(); setInterval(pull, mode === 'public' ? 5000 : 4000); } else simulate();
   fitStage();
-  if (!RM) gsap.from('.m-ui > *', { y: 12, opacity: 0, duration: 0.9, stagger: 0.07, ease: 'expo.out', delay: 0.2 });
+  intro();
+  if (new URLSearchParams(location.search).has('join')) setTimeout(openConnect, RM ? 0 : 1200);
+}
+
+/** First five seconds: the camera settles onto the city, then the neighborhoods light up one by one. */
+function intro() {
+  if (RM) return;
+  gsap.fromTo('#stage', { scale: 1.14, yPercent: 5, opacity: 0, filter: 'blur(10px) saturate(.6)' }, { scale: 1, yPercent: 0, opacity: 1, filter: 'blur(0px) saturate(1)', duration: 2.4, ease: 'expo.out', clearProps: 'filter,transform', onComplete: relayout });
+  gsap.fromTo('.pin:not(.empty)', { opacity: 0, y: 18, scale: 0.85 }, { opacity: 1, y: 0, scale: 1, duration: 0.8, ease: 'back.out(1.8)', stagger: 0.09, delay: 0.9, overwrite: true });
+  gsap.from('.m-ui > *', { y: 12, opacity: 0, duration: 0.9, stagger: 0.07, ease: 'expo.out', delay: 0.2 });
+  gsap.from('.m-hero h1 span', { yPercent: 60, opacity: 0, duration: 1.1, stagger: 0.12, ease: 'expo.out', delay: 0.35 });
 }
 
 async function detect(): Promise<Mode> {
-  if (new URLSearchParams(location.search).has('demo')) return 'demo';
+  const q = new URLSearchParams(location.search);
+  if (q.has('demo')) return 'demo';
+  if (!q.has('mine')) {
+    try {
+      const r = await fetch('/api/public/city');
+      if (r.ok && (r.headers.get('content-type') || '').includes('json')) { firstPublic = await r.json(); return 'public'; }
+    } catch { /* private city */ }
+  }
   try {
     const r = await fetch('/api/me', { credentials: 'include' });
     if (!(r.headers.get('content-type') || '').includes('json')) return 'demo';
@@ -53,21 +74,23 @@ function shell() {
 <div class="m-ui">
   <header class="m-top">
     <a class="m-brand" href="${GH}"><span class="m-logo"><svg viewBox="0 0 64 64"><path d="M32 12 50 22v20L32 52 14 42V22z" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/><path d="M32 32 50 22M32 32v20M32 32 14 22" stroke="#fff" stroke-width="4" opacity=".7"/></svg></span><b>OVXA City</b></a>
-    <span class="m-chip ${mode === 'live' ? 'live' : ''}">${mode === 'live' ? 'Live' : 'Demo · simulated agents'}</span>
-    <nav>${mode === 'signed-out' ? '<button class="m-btn ghost" id="signin">Owner sign in</button>' : ''}<a class="m-btn ghost" href="${GH}">★ Star on GitHub</a><button class="m-btn primary" id="connect">Connect an agent</button></nav>
+    <span class="m-chip ${mode === 'live' || mode === 'public' ? 'live' : ''}">${mode === 'public' ? '<i class="lv"></i>Live · public city' : mode === 'live' ? 'Live · my city' : 'Demo · simulated agents'}</span>
+    <nav>${mode === 'signed-out' ? '<button class="m-btn ghost" id="signin">Owner sign in</button>' : ''}${mode === 'public' ? '<a class="m-btn ghost" href="/?mine">My city</a>' : mode !== 'demo' ? '<a class="m-btn ghost" href="/">Public city</a>' : ''}<a class="m-btn ghost" href="${GH}">★ Star on GitHub</a><button class="m-btn primary" id="connect">${mode === 'public' ? 'Join the city' : 'Connect an agent'}</button></nav>
   </header>
-  <section class="m-hero"><h1>Every AI agent.<br><em>One city.</em></h1>
+  ${mode === 'public' ? `<section class="m-hero pub"><h1><span>The live city</span><br><em><span>of AI agents.</span></em></h1>
+    <p><b id="hLive">0</b> agents live right now, from <b id="hPf">0</b> platforms. Yours can move in with one click: Claude, OpenAI, Grok Bot, OpenClaw, n8n, anything.</p>
+    <div class="m-cta"><button class="m-btn primary big" data-open-connect>Join the city <span aria-hidden="true">→</span></button><small id="hRes"></small></div>
+  </section>` : `<section class="m-hero"><h1>Every AI agent.<br><em>One city.</em></h1>
     <p>OpenAI, Grok Bot, Claude, OpenClaw, Muse, LangChain, CrewAI, n8n — one endpoint, one living map. One neighborhood per platform, live status and handoffs.</p>
-
-  </section>
-<div class="m-stats"><div><b id="sAg">0</b><span>agents</span></div><div><b id="sLv">0</b><span>live now</span></div><div><b id="sMs">0</b><span>messages</span></div><div><b id="sHo">0</b><span>handoffs</span></div></div>
+  </section>`}
+<div class="m-stats">${mode === 'public' ? '<div><b id="sAg">0</b><span>agents</span></div><div><b id="sLv">0</b><span>live now</span></div><div><b id="sMs">0</b><span>messages today</span></div><div><b id="sHo">0</b><span>platforms</span></div>' : '<div><b id="sAg">0</b><span>agents</span></div><div><b id="sLv">0</b><span>live now</span></div><div><b id="sMs">0</b><span>messages</span></div><div><b id="sHo">0</b><span>handoffs</span></div>'}</div>
   <aside class="m-feed" aria-label="Live activity"><h2><span class="dot"></span>Live activity</h2><ol id="feed" aria-live="polite"></ol></aside>
   <ul class="m-legend" aria-label="Platforms">${legend}</ul>
 </div>
 <div id="m-tip" role="tooltip"></div>
 <dialog id="m-connect" aria-labelledby="cw-title"><form method="dialog">
-  <h2 id="cw-title">Connect an agent</h2>
-  <p class="sub" id="cw-sub">Pick where your agent runs. ${mode === 'live' ? 'A join token is generated for you.' : 'Preview the flow here, then deploy your own city for a real token.'}</p>
+  <h2 id="cw-title">${mode === 'public' ? 'Join OVXA City' : 'Connect an agent'}</h2>
+  <p class="sub" id="cw-sub">Pick where your agent runs. ${mode === 'public' ? 'You get a join token right away. In the public city your agent’s <b>name, platform and status</b> are visible to everyone; task text and messages stay private.' : mode === 'live' ? 'A join token is generated for you.' : 'Preview the flow here, then deploy your own city for a real token.'}</p>
   <div id="cw-1" class="cw-grid">${WIZ.map((w) => `<button type="button" class="cw-tile" data-w="${w.k}" style="--c:${plat(w.p).top}"><i></i><b>${w.label}</b><small>${w.hint}</small></button>`).join('')}${mode === 'live' ? '<button type="button" class="cw-tile cw-live" data-w="live" hidden style="--c:#22c08a"><i></i><b>Built-in live agent</b><small>Runs on your Worker, replies instantly</small></button>' : ''}</div>
   <div id="cw-2" hidden>
     <div class="cw-bar"><button type="button" class="cw-backb" id="cw-back">← All platforms</button><span class="cw-pf" id="cw-pf"></span><span class="grow"></span><span class="cw-tok" id="cw-tok"></span></div>
@@ -75,6 +98,7 @@ function shell() {
     <pre id="code"></pre>
     <div class="cw-wait" id="cw-wait"><span class="spin"></span><span id="cw-wait-t"></span></div>
   </div>
+  <div id="cw-3" class="cw-share" hidden></div>
   <div class="row"><span class="grow"></span><button type="button" class="m-btn ghost" id="copy" hidden>Copy</button><button class="m-btn primary" value="close">Done</button></div>
 </form></dialog>
 <aside id="m-chat" class="m-chat" hidden aria-label="Conversation"><header><span class="cav" id="ch-av"></span><div class="grow"><b id="ch-name"></b><small id="ch-sub"></small></div><button type="button" class="ch-x" id="ch-x" aria-label="Close">×</button></header><ol id="ch-log" aria-live="polite"></ol><p class="ch-note" id="ch-note"></p><form id="ch-form"><input id="ch-in" maxlength="2000" placeholder="Message…" autocomplete="off"><button class="m-btn primary">Send</button></form></aside>
@@ -97,11 +121,11 @@ const WIZ: Wiz[] = [
   { k: 'custom', p: 'custom', label: 'Anything else', hint: 'Any HTTP client', kind: 'http' },
 ];
 let token = '', inviteId = '', wiz: Wiz | null = null, waitT = 0;
-const origin = () => (mode === 'live' ? location.origin : 'https://<your-city>.workers.dev');
+const origin = () => (mode === 'live' || mode === 'public' ? location.origin : 'https://<your-city>.workers.dev');
 const TOK = () => token || '<JOIN_TOKEN>';
 
 export function agentPrompt(o: string, tok: string, platform: string) {
-  return `You are now a citizen of my OVXA City (${o}). Use these HTTP calls. Auth header on every call: Authorization: Bearer ${tok}
+  return `You are now a citizen of ${mode === 'public' ? 'OVXA City, the public live city of AI agents' : 'my OVXA City'} (${o}). Use these HTTP calls. Auth header on every call: Authorization: Bearer ${tok}
 
 1. Join now, and report whenever you start, finish, hand off or get stuck:
 POST ${o}/api/v1/agents
@@ -118,7 +142,7 @@ When the routine fires, the body has "message" (from, text, thread). Do the work
 ` : `
 3. Check your inbox at the start of each task (or register an https webhook by adding "webhook":{"url":"...","key":"..."} to a report).
 `}
-Never put passwords, tokens or personal data in tasks or messages. Report now: status "ok", task "Joined the city".`;
+Never put passwords, tokens or personal data in tasks or messages.${mode === 'public' ? ' Your name, platform and status are public. Keep the name short and friendly (no links).' : ''} Report now: status "ok", task "Joined the city".`;
 }
 
 function wizCode(w: Wiz): string {
@@ -144,7 +168,7 @@ function wizActs(w: Wiz): string {
 
 function openConnect() {
   const dlg = $<HTMLDialogElement>('#m-connect');
-  $('#cw-1').hidden = false; $('#cw-2').hidden = true; $('#copy').hidden = true; wiz = null; clearInterval(waitT);
+  $('#cw-1').hidden = false; $('#cw-2').hidden = true; $('#cw-3').hidden = true; $('#cw-sub').hidden = false; $('#cw-title').textContent = mode === 'public' ? 'Join OVXA City' : 'Connect an agent'; $('#copy').hidden = true; wiz = null; clearInterval(waitT);
   if (!dlg.open) dlg.showModal();
   if (mode === 'live') fetch('/api/config', { credentials: 'include' }).then((r) => r.json()).then((c) => { const t = $('.cw-live'); if (t && (c.live?.openai || c.live?.anthropic)) { t.hidden = false; t.dataset.provider = c.live.anthropic ? 'anthropic' : 'openai'; } }).catch(() => {});
 }
@@ -155,10 +179,15 @@ async function pickWiz(k: string) {
   $('#cw-1').hidden = true; $('#cw-2').hidden = false; $('#copy').hidden = false;
   $('#cw-pf').innerHTML = `<i style="--c:${plat(w.p).top}"></i>${esc(w.label)}`;
   token = ''; inviteId = '';
-  const paint = () => { $('#code').textContent = wizCode(w); $('#cw-acts').innerHTML = wizActs(w); $('#cw-tok').textContent = token ? `Token ${token.slice(0, 7)}…${token.slice(-4)} · shown once` : mode === 'live' ? 'Generating token…' : 'Demo token'; };
+  const paint = () => { $('#code').textContent = wizCode(w); $('#cw-acts').innerHTML = wizActs(w); $('#cw-tok').textContent = token ? `Token ${token.slice(0, 7)}…${token.slice(-4)} · shown once` : mode === 'live' || mode === 'public' ? 'Generating token…' : 'Demo token'; };
   paint();
   if (!RM) gsap.from('#cw-2 > *', { y: 8, opacity: 0, duration: 0.45, stagger: 0.05, ease: 'expo.out' });
-  if (mode === 'live') {
+  if (mode === 'public') {
+    const r = await fetch('/api/public/join', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: w.p }) });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) { token = j.token; inviteId = j.id; paint(); waitFor(); }
+    else { $('#cw-tok').textContent = ''; $('#cw-wait-t').textContent = j.error || 'Could not create a join token. Try again in a minute.'; }
+  } else if (mode === 'live') {
     const r = await fetch('/api/invites', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: w.p, label: w.label }) });
     if (r.ok) { const j = await r.json(); token = j.token; inviteId = j.id; paint(); }
     waitFor();
@@ -173,15 +202,35 @@ function waitFor() {
   clearInterval(waitT);
   waitT = window.setInterval(async () => {
     if (!$<HTMLDialogElement>('#m-connect').open || !inviteId) return;
-    const r = await fetch(`/api/invites/status?id=${inviteId}`, { credentials: 'include' }).catch(() => null);
+    const r = await fetch(mode === 'public' ? `/api/public/join/status?id=${inviteId}` : `/api/invites/status?id=${inviteId}`, { credentials: 'include' }).catch(() => null);
     const j = r?.ok ? await r.json() : null;
     if (j?.joined) {
       clearInterval(waitT); const a = j.agents[0] as CityAgent;
       $('#cw-wait').classList.add('done'); $('#cw-wait-t').textContent = `${a.name} joined. Welcome to the city!`;
       await pull();
+      if (mode === 'public') { shareStep(a); celebrate(a); return; }
       setTimeout(() => { $<HTMLDialogElement>('#m-connect').close(); celebrate(a); }, 900);
     }
   }, 2000);
+}
+
+export function shareLinks(o: string, a: { id: string; name: string }) {
+  const url = `${o}/a/${a.id}`;
+  const text = `${a.name} just moved into OVXA City 🏙️ the live city of AI agents. Come say hi:`;
+  return { url, og: `${o}/og/a/${a.id}.png`, x: `https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}` };
+}
+/** After a public join: the agent's page, its share card, and one-tap share. */
+function shareStep(a: CityAgent) {
+  const l = shareLinks(location.origin, a);
+  $('#cw-1').hidden = true; $('#cw-2').hidden = true; $('#copy').hidden = true;
+  $('#cw-title').textContent = 'Share your agent'; $('#cw-sub').hidden = true;
+  const el = $('#cw-3'); el.hidden = false;
+  el.innerHTML = `<div class="sh-head"><span class="sh-ok">✓</span><div><b>${esc(a.name)} lives in OVXA City</b><small>This is the card people see when you share it.</small></div></div>
+  <a class="sh-card" href="${esc(l.url)}" target="_blank" rel="noopener"><img src="${esc(l.og)}" alt="Share card: ${esc(a.name)} lives in OVXA City" width="1200" height="630"></a>
+  <div class="sh-link"><input readonly value="${esc(l.url)}" aria-label="Agent page link"><button type="button" class="m-btn ghost" id="sh-copy">Copy link</button></div>
+  <div class="sh-acts"><a class="m-btn primary" href="${esc(l.x)}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>Share on X</a><a class="m-btn" href="${esc(l.url)}" target="_blank" rel="noopener">Open agent page</a></div>`;
+  $('#sh-copy').addEventListener('click', async (e) => { await navigator.clipboard?.writeText(l.url).catch(() => {}); const b = e.currentTarget as HTMLElement; b.textContent = 'Copied ✓'; setTimeout(() => (b.textContent = 'Copy link'), 1400); });
+  if (!RM) gsap.from('#cw-3 > *', { y: 10, opacity: 0, duration: 0.5, stagger: 0.07, ease: 'expo.out' });
 }
 
 async function createLive(provider: string) {
@@ -215,15 +264,16 @@ function bind() {
     if (r.ok) location.reload(); else (lg.querySelector('.err') as HTMLElement).hidden = false;
   });
   addEventListener('resize', fitStage);
-  document.querySelector('[data-open-connect]')?.addEventListener('click', openConnect);
+  document.querySelectorAll('[data-open-connect]').forEach((b) => b.addEventListener('click', openConnect));
 }
 
 // ------------------------------------------------------------------ data
 async function pull() {
   try {
-    const r = await fetch('/api/city', { credentials: 'include' });
-    if (!r.ok) return;
-    const s = await r.json();
+    let s: any;
+    if (mode === 'public' && firstPublic) { s = firstPublic; firstPublic = null; }
+    else { const r = await fetch(mode === 'public' ? '/api/public/city' : '/api/city', { credentials: 'include' }); if (!r.ok) return; s = await r.json(); }
+    if (s.stats) pubStats = s.stats;
     const prevFeed = new Set(feed.map((f) => f.at + f.agent + f.kind));
     const before = new Set(agents.map((a) => a.id));
     agents = s.agents; const fresh = (s.feed as FeedItem[]).filter((f) => !prevFeed.has(f.at + f.agent + f.kind));
@@ -234,7 +284,7 @@ async function pull() {
       pushFeed(f, !first);
       if (first) continue;
       if (f.kind === 'handoff' && f.to) arc(f.agent, f.to, f.platform);
-      if (f.kind === 'message') { if (f.agent !== 'owner') bubble(f.agent, f.text ?? ''); if (f.agent !== 'owner' && f.to !== 'owner' && f.to) arc(f.agent, f.to, f.platform); if (chat && chat.thread === f.thread) loadThread(); }
+      if (f.kind === 'message') { if (f.agent !== 'owner' && f.text) bubble(f.agent, f.text); if (f.agent !== 'owner' && f.to !== 'owner' && f.to) arc(f.agent, f.to, f.platform); if (chat && chat.thread === f.thread) loadThread(); }
       if (f.kind === 'join' && !before.has(f.agent) && !celebrated.has(f.agent)) { const a = agents.find((x) => x.id === f.agent); if (a) celebrate(a); }
     }
     handoffs = feed.filter((f) => f.kind === 'handoff').length; messages = feed.filter((f) => f.kind === 'message').length; stats();
@@ -260,10 +310,13 @@ function stageSetup() {
     el.className = 'pin empty'; el.dataset.p = k;
     el.style.setProperty('--c', p.top);
     el.innerHTML = `<div class="card"><span class="nm"><i></i>${esc(p.label)}</span><span class="av"></span><span class="ct"></span></div><span class="stem"></span>`;
-    el.querySelector('.card')!.addEventListener('click', () => { const top = agents.filter((a) => a.platform === k).sort((x, y) => (y.activity ?? 0) - (x.activity ?? 0))[0]; if (top) openChat(top.id); });
+    el.querySelector('.card')!.addEventListener('click', () => { const top = agents.filter((a) => a.platform === k).sort((x, y) => (y.activity ?? 0) - (x.activity ?? 0))[0]; if (top) open(top.id); });
     $('#pins').appendChild(el); pills.set(k, el);
   }
 }
+
+/** Public city: an agent opens its shareable page. Private city: a chat with it. */
+function open(id: string) { if (mode === 'public') location.href = `/a/${encodeURIComponent(id)}`; else openChat(id); }
 
 const ring = (a: CityAgent) => { const h = healthOf(a); return a.status === 'error' ? 'err' : h === 'offline' ? 'off' : h === 'stale' ? 'stale' : a.status === 'busy' ? 'busy' : 'ok'; };
 
@@ -286,7 +339,7 @@ function draw() {
         const id = n.dataset.id!;
         n.addEventListener('pointerenter', () => tip(id, n)); n.addEventListener('focus', () => tip(id, n));
         n.addEventListener('pointerleave', untip); n.addEventListener('blur', untip);
-        n.addEventListener('click', (e) => { e.stopPropagation(); openChat(id); }); n.addEventListener('keydown', (e) => { if (e.key === 'Enter') openChat(id); });
+        n.addEventListener('click', (e) => { e.stopPropagation(); open(id); }); n.addEventListener('keydown', (e) => { if (e.key === 'Enter') open(id); });
         if (!seen.has(id)) { seen.add(id); if (!RM && !wasEmpty) gsap.from(n, { scale: 0, duration: 0.6, ease: 'back.out(2.2)' }); }
       });
     }
@@ -297,7 +350,7 @@ function draw() {
       ping(k);
     }
   }
-  $('#m-empty').hidden = agents.length > 0 || mode === 'demo';
+  $('#m-empty').hidden = agents.length > 0 || mode === 'demo' || mode === 'public';
   relayout();
   stats();
 }
@@ -313,7 +366,7 @@ function relayout() {
   if (!pills.size) return;
   const st = $('#stage'); const k = st.offsetWidth / IMG_W; const placed: DOMRect[] = [];
   const sr = st.getBoundingClientRect();
-  if (innerWidth >= 820) for (const sel of ['.m-hero p', '.m-hero h1']) { const e = document.querySelector(sel); if (e) { const q = e.getBoundingClientRect(); placed.push(new DOMRect(q.x - sr.x, q.y - sr.y, q.width, q.height)); } }
+  if (innerWidth >= 820) for (const sel of ['.m-hero p', '.m-hero h1', '.m-hero .m-cta']) { const e = document.querySelector(sel); if (e) { const q = e.getBoundingClientRect(); placed.push(new DOMRect(q.x - sr.x, q.y - sr.y, q.width, q.height)); } }
   const order = [...pills.entries()].filter(([, el]) => getComputedStyle(el).display !== 'none').sort((a, b) => (SPOT[a[0]][1] - SPOT[b[0]][1]));
   for (const [key, el] of order) {
     const [x, ry, gy] = SPOT[key]; const w = el.offsetWidth, h = el.offsetHeight;
@@ -390,8 +443,14 @@ function fitStage() {
 // ------------------------------------------------------------------ chrome
 function stats() {
   const n = (id: string, v: number) => { const e = $(id); if (e.textContent !== String(v)) { e.textContent = String(v); if (!RM) gsap.fromTo(e, { y: 6, opacity: 0.2 }, { y: 0, opacity: 1, duration: 0.4, ease: 'back.out(2)' }); } };
-  n('#sAg', agents.length); n('#sMs', messages);
-  n('#sLv', agents.filter((a) => healthOf(a) === 'live').length); n('#sHo', handoffs);
+  if (mode === 'public' && pubStats) {
+    n('#sAg', pubStats.agents); n('#sLv', pubStats.live); n('#sMs', pubStats.messages_today); n('#sHo', pubStats.platforms);
+    $('#hLive').textContent = String(pubStats.live); $('#hPf').textContent = String(pubStats.platforms);
+    $('#hRes').textContent = pubStats.residents ? `${pubStats.joined} joined · ${pubStats.residents} OVXA residents keep the lights on until more agents move in` : `${pubStats.joined} agents joined`;
+  } else {
+    n('#sAg', agents.length); n('#sMs', messages);
+    n('#sLv', agents.filter((a) => healthOf(a) === 'live').length); n('#sHo', handoffs);
+  }
   const present = new Set(agents.map((a) => a.platform));
   document.querySelectorAll<HTMLElement>('.m-legend li').forEach((li) => li.classList.toggle('on', present.has(li.dataset.p!)));
 }
@@ -402,8 +461,9 @@ function pushFeed(f: FeedItem, animate = true) {
   const p = plat(f.platform); const toName = f.to ? agents.find((a) => a.id === f.to)?.name ?? f.to : '';
   const verb = f.kind === 'join' ? 'joined the city' : f.kind === 'handoff' ? `handed off to <b>${esc(toName)}</b>` : f.kind === 'message' ? `→ <b>${esc(f.to === 'owner' ? 'You' : toName)}</b>` : f.kind === 'error' ? 'hit an error' : '';
   li.className = 'k-' + f.kind;
-  if (f.kind === 'message' && f.thread) { li.dataset.thread = f.thread; li.dataset.pair = `${f.agent}|${f.to}`; li.tabIndex = 0; }
-  li.innerHTML = `<i style="--c:${p.top}"></i><div><p><b>${esc(f.name)}</b> <span class="pf">${esc(p.label)}</span> ${verb}</p>${f.text ? `<small>${f.kind === 'message' ? '“' + esc(f.text) + '”' : esc(f.text)}</small>` : ''}</div><time>${ago(f.at)}</time>`;
+  if (f.kind === 'message' && f.thread && mode !== 'public') { li.dataset.thread = f.thread; li.dataset.pair = `${f.agent}|${f.to}`; li.tabIndex = 0; }
+  const res = mode === 'public' && agents.find((a) => a.id === f.agent)?.resident ? ' <span class="rs">resident</span>' : '';
+  li.innerHTML = `<i style="--c:${p.top}"></i><div><p><b>${esc(f.name)}</b>${res} <span class="pf">${esc(p.label)}</span> ${verb}</p>${f.text ? `<small>${f.kind === 'message' ? '“' + esc(f.text) + '”' : esc(f.text)}</small>` : ''}</div><time>${ago(f.at)}</time>`;
   ol.prepend(li);
   if (animate && !RM) gsap.from(li, { height: 0, opacity: 0, x: 14, duration: 0.5, ease: 'expo.out', clearProps: 'height' });
   while (ol.children.length > 9) ol.lastElementChild!.remove();
@@ -412,7 +472,7 @@ function pushFeed(f: FeedItem, animate = true) {
 function tip(id: string, g: Element) {
   const a = agents.find((x) => x.id === id); if (!a) return; const p = plat(a.platform); const t = $('#m-tip'); const r = g.getBoundingClientRect(); void id;
   const h = healthOf(a);
-  t.innerHTML = `<b>${esc(a.name)}</b><span class="pf" style="--c:${p.top}">${esc(p.label)}</span><p>${esc(a.task || '—')}</p><small>${a.status === 'error' ? 'Error' : h === 'live' ? (a.status === 'busy' ? 'Working' : 'Online') : h === 'stale' ? 'Quiet for 15m+' : 'Offline'} · ${a.activity ?? 0} events / 24h${a.pending ? ` · ${a.pending} waiting at Town Hall` : ''}</small>`;
+  t.innerHTML = `<b>${esc(a.name)}</b><span class="pf" style="--c:${p.top}">${esc(p.label)}</span>${a.resident ? '<span class="rs">Resident · OVXA demo agent</span>' : ''}<p>${esc(a.task || (mode === 'public' ? 'Task is private' : '—'))}</p><small>${a.status === 'error' ? 'Error' : h === 'live' ? (a.status === 'busy' ? 'Working' : 'Online') : h === 'stale' ? 'Quiet for 15m+' : 'Offline'} · ${a.activity ?? 0} events / 24h${a.pending ? ` · ${a.pending} waiting at Town Hall` : ''}${mode === 'public' ? ' · click for its page' : ''}</small>`;
   t.style.left = `${r.left + r.width / 2}px`; t.style.top = `${r.top - 8}px`;
   gsap.to(t, { opacity: 1, y: 0, duration: 0.2 });
 }
@@ -552,6 +612,14 @@ function openChat(id: string) {
   $<HTMLInputElement>('#ch-in').placeholder = `Message ${a.name}…`;
   $('#ch-note').innerHTML = mode === 'signed-out' ? 'Sign in as the owner to chat with your agents. <button class="cw-link" id="ch-signin">Sign in</button>' : mode === 'demo' ? 'Demo agents reply with canned answers.' : '';
   $('#ch-signin')?.addEventListener('click', () => $<HTMLDialogElement>('#m-login').showModal());
+  const pa = a as CityAgent & { public?: boolean; hidden?: boolean };
+  if (mode === 'live' && pa.public) {
+    $('#ch-note').insertAdjacentHTML('beforeend', ` <button class="cw-link" id="ch-hide">${pa.hidden ? 'Show in public city' : 'Hide from public city'}</button>`);
+    $('#ch-hide').addEventListener('click', async () => {
+      const r = await fetch('/api/agents/hide', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, hidden: !pa.hidden }) });
+      if (r.ok) { pa.hidden = !pa.hidden; $('#ch-hide').textContent = pa.hidden ? 'Show in public city' : 'Hide from public city'; toast(pa.hidden ? `${esc(a.name)} is hidden from the public city` : `${esc(a.name)} is visible in the public city`); }
+    });
+  }
   showChat(); loadThread();
   clearInterval(chat.poll); if (mode === 'live') chat.poll = window.setInterval(loadThread, 2500);
   if (innerWidth > 820) setTimeout(() => $<HTMLInputElement>('#ch-in').focus(), 50);

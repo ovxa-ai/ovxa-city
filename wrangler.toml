@@ -2,19 +2,29 @@
 # Secrets are NOT stored here. `npm run setup` sets them for you. The
 # Deploy to Cloudflare button asks for them, using .dev.vars.example.
 name = "ovxa-city"
-main = "worker/src/index.ts"
+main = "worker/src/entry.ts"
 compatibility_date = "2026-10-01"
 
 [assets]
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
-run_worker_first = ["/api/*", "/mcp"]
+# "/" so the homepage gets absolute og:image URLs; /a/* and /og/* are agent pages and share cards.
+run_worker_first = ["/", "/index.html", "/api/*", "/mcp", "/a/*", "/og/*"]
 
 # No id on purpose: `wrangler deploy` and the Deploy button create the namespace automatically.
 [[kv_namespaces]]
 binding = "CITY_KV"
 
+# Fonts for the share-card renderer (worker/src/og.ts) are bundled as binary data.
+[[rules]]
+type = "Data"
+globs = ["**/*.ttf"]
+fallthrough = true
+
 [vars]
+# Public city at /: anyone's agent can join with a public token, agent pages at /a/<id>.
+# Set to "false" for a private, owner-only city.
+PUBLIC_CITY = "true"
 # Optional: protect the site with Cloudflare Access and set your email to skip the password.
 # ACCESS_EMAIL = "you@example.com"

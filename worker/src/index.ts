@@ -1,3 +1,4 @@
+import { agentPage, publicName, publicTask, residentAgents, residentCount, residentEvents, RESIDENTS, type PublicAgent } from './public';
 /**
  * OVXA City Worker — tiny API in front of Cloudflare KV.
  *
@@ -36,6 +37,8 @@ export interface Env {
   LIVE_OPENAI_MODEL?: string;
   LIVE_ANTHROPIC_MODEL?: string;
   ASSETS?: { fetch: (r: Request) => Promise<Response> };
+  /** "true" turns on the public city at / (anyone's agent can join with a public token). */
+  PUBLIC_CITY?: string;
 }
 
 export interface BotConfig { name: string; token: string; webhook?: string; webhookKey?: string; role?: string }
@@ -153,8 +156,15 @@ export async function handle(req: Request, env: Env, ctx?: { waitUntil(p: Promis
   const bots = parseBots(env);
 
   if (path === '/mcp') return mcp(req, env, bots, ctx);
+  const pub = env.PUBLIC_CITY === 'true';
+  if (pub && (path.startsWith('/api/public/') || path.startsWith('/a/') || path.startsWith('/og/'))) {
+    if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+    const r = await publicRoutes(req, env, url, ctx); if (r) return r;
+  }
   if (!path.startsWith('/api/')) {
-    return env.ASSETS ? env.ASSETS.fetch(req) : new Response('Not found', { status: 404 });
+    if (!env.ASSETS) return new Response('Not found', { status: 404 });
+    const res = await env.ASSETS.fetch(req);
+    return path === '/' || path === '/index.html' ? absoluteMeta(res, url.origin) : res;
   }
 
   if (req.method === 'OPTIONS' && (path === '/mcp' || path.startsWith('/api/v1/') || path === '/api/status')) {
@@ -277,6 +287,14 @@ export async function handle(req: Request, env: Env, ctx?: { waitUntil(p: Promis
   return json({ error: 'not found' }, 404);
 }
 
+/** Social cards need absolute URLs; rewrite the homepage meta to this deployment's origin. */
+function absoluteMeta(res: Response, origin: string) {
+  const R = (globalThis as any).HTMLRewriter;
+  if (!R || !(res.headers.get('content-type') || '').includes('text/html')) return res;
+  const abs = { element(el: any) { const k = el.getAttribute('property') || el.getAttribute('name') || ''; const v = el.getAttribute('content') || ''; if (/(og:image|twitter:image|og:url)$/.test(k) && v.startsWith('/')) el.setAttribute('content', origin + v); } };
+  return new R().on('meta', abs).on('link[rel="canonical"]', { element(el: any) { const v = el.getAttribute('href') || ''; if (v.startsWith('/')) el.setAttribute('href', origin + v); } }).transform(res);
+}
+
 // ====================================================================== universal agents
 export const PLATFORMS = ['openai', 'grokbot', 'claude', 'openclaw', 'muse', 'langchain', 'crewai', 'n8n', 'gemini', 'custom'] as const;
 export type Platform = (typeof PLATFORMS)[number];
@@ -292,9 +310,11 @@ export interface Agent {
   id: string; name: string; platform: Platform; status: 'ok' | 'busy' | 'error' | 'idle';
   task?: string; metrics?: Record<string, number>; pending?: number;
   events: number[]; first_seen: string; updated_at: string;
+  /** shown in the public city (always true for agents that joined with a public token) */
+  public?: boolean; share_task?: boolean; hidden?: boolean; scope?: 'public' | 'private';
 }
-export interface FeedItem { at: string; agent: string; name: string; platform: Platform; kind: 'join' | 'status' | 'handoff' | 'error' | 'message'; text?: string; to?: string; thread?: string }
-interface Invite { label: string; platform: Platform; created_at: string; agents?: string[] }
+export interface FeedItem { at: string; agent: string; name: string; platform: Platform; kind: 'join' | 'status' | 'handoff' | 'error' | 'message'; text?: string; to?: string; thread?: string; src?: 'p' }
+interface Invite { label: string; platform: Platform; created_at: string; agents?: string[]; public?: boolean }
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization, content-type, mcp-session-id, mcp-protocol-version', 'access-control-allow-methods': 'GET, POST, OPTIONS' };
 const STALE_MS = 15 * 60_000, OFFLINE_MS = 6 * 3600_000;
 
@@ -303,7 +323,7 @@ async function sha(s: string) { const d = new Uint8Array(await crypto.subtle.dig
 const slugId = (v: unknown) => (typeof v === 'string' ? v.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) : '');
 
 /** Who is calling? Returns a namespace + default platform, or null. */
-export interface Who { via: 'key' | 'bot' | 'invite'; principal: string; platform?: Platform; botId?: string; inviteHash?: string }
+export interface Who { via: 'key' | 'bot' | 'invite'; principal: string; platform?: Platform; botId?: string; inviteHash?: string; pub?: boolean }
 export async function authAgent(req: Request, env: Env, bots: Record<string, BotConfig>): Promise<Who | null> {
   const m = /^Bearer\s+(.+)$/i.exec(req.headers.get('authorization') || '');
   if (!m) return null;
@@ -313,7 +333,7 @@ export async function authAgent(req: Request, env: Env, bots: Record<string, Bot
   if (tok.startsWith('oc_')) {
     const h = await sha(tok);
     const inv = (await env.CITY_KV.get(`invite:${h}`, 'json')) as Invite | null;
-    if (inv) return { via: 'invite', principal: `inv:${h}`, platform: inv.platform, inviteHash: h };
+    if (inv) return { via: 'invite', principal: `inv:${h}`, platform: inv.platform, inviteHash: h, pub: !!inv.public };
   }
   return null;
 }
@@ -334,25 +354,71 @@ export function sanitizeAgent(body: any, fallback: { id?: string; platform?: Pla
     platform: a.platform != null || body.platform != null ? normPlatform(a.platform ?? body.platform) : fallback.platform ?? 'custom',
     status: status as Agent['status'], task: str(body.task ?? body.message, 200), metrics,
     handoff: h ? { to: slugId(h.to), note: str(h.note ?? h.task, 140) } : undefined,
+    pub: flag(body.public ?? a.public), share: flag(body.share_task ?? a.share_task),
   };
 }
 
-async function upsertAgent(env: Env, a: { id: string; name: string; platform: Platform; status: Agent['status']; task?: string; metrics?: Record<string, number>; pending?: number; handoff?: { to: string; note?: string } }) {
+const flag = (v: unknown) => (v === true ? true : v === false ? false : undefined);
+type Upsert = { id: string; name: string; platform: Platform; status: Agent['status']; task?: string; metrics?: Record<string, number>; pending?: number; handoff?: { to: string; note?: string }; pub?: boolean; share?: boolean; scope?: 'public' | 'private' };
+/** Safe copy of a feed item for the public feed: task text only when the agent opted in, message text never. */
+function publicItem(f: FeedItem, a: Agent): FeedItem {
+  const text = f.kind === 'message' ? undefined : a.share_task ? publicTask(f.text) : undefined;
+  return { at: f.at, agent: f.agent, name: f.name, platform: f.platform, kind: f.kind, to: f.to, text, ...(a.scope === 'public' ? { src: 'p' as const } : {}) };
+}
+async function upsertAgent(env: Env, a: Upsert) {
   const prev = (await env.CITY_KV.get(`agent:${a.id}`, 'json')) as Agent | null;
   const nowMs = Date.now(), now = new Date(nowMs).toISOString();
   const events = (prev?.events ?? []).filter((t) => nowMs - t < 24 * 3600_000).concat(nowMs).slice(-200);
-  const agent: Agent = { id: a.id, name: a.name, platform: a.platform, status: a.status, task: a.task, metrics: a.metrics && Object.keys(a.metrics).length ? a.metrics : prev?.metrics, pending: a.pending ?? prev?.pending, events, first_seen: prev?.first_seen ?? now, updated_at: now };
+  const scope = prev?.scope ?? a.scope ?? 'private';
+  const agent: Agent = {
+    id: a.id, name: a.name, platform: a.platform, status: a.status, task: a.task, metrics: a.metrics && Object.keys(a.metrics).length ? a.metrics : prev?.metrics, pending: a.pending ?? prev?.pending, events, first_seen: prev?.first_seen ?? now, updated_at: now,
+    scope, public: scope === 'public' ? true : a.pub ?? prev?.public ?? false, share_task: a.share ?? prev?.share_task ?? false, hidden: prev?.hidden,
+  };
   await env.CITY_KV.put(`agent:${a.id}`, JSON.stringify(agent));
-  const index = ((await env.CITY_KV.get('agents', 'json')) as string[] | null) ?? [];
-  if (!index.includes(a.id)) { index.push(a.id); await env.CITY_KV.put('agents', JSON.stringify(index.slice(-500))); }
-  const feed = ((await env.CITY_KV.get('feed', 'json')) as FeedItem[] | null) ?? [];
+  // public agents live in their own index so public sign-ups can never evict a private agent
+  if (scope === 'private') {
+    const index = ((await env.CITY_KV.get('agents', 'json')) as string[] | null) ?? [];
+    if (!index.includes(a.id)) { index.push(a.id); await env.CITY_KV.put('agents', JSON.stringify(index.slice(-500))); }
+  }
+  const pidx = ((await env.CITY_KV.get('pagents', 'json')) as string[] | null) ?? [];
+  if (agent.public && !pidx.includes(a.id)) await env.CITY_KV.put('pagents', JSON.stringify([...pidx, a.id].slice(-1000)));
+  else if (!agent.public && pidx.includes(a.id)) await env.CITY_KV.put('pagents', JSON.stringify(pidx.filter((x) => x !== a.id)));
+  const items: FeedItem[] = [];
   const base = { at: now, agent: a.id, name: a.name, platform: a.platform };
-  if (!prev) feed.unshift({ ...base, kind: 'join', text: a.task });
-  if (a.handoff?.to) feed.unshift({ ...base, kind: 'handoff', to: a.handoff.to, text: a.handoff.note });
-  else if (prev && (prev.task !== a.task || prev.status !== a.status)) feed.unshift({ ...base, kind: a.status === 'error' ? 'error' : 'status', text: a.task });
-  await env.CITY_KV.put('feed', JSON.stringify(feed.slice(0, 100)));
+  if (!prev) items.push({ ...base, kind: 'join', text: a.task });
+  if (a.handoff?.to) items.push({ ...base, kind: 'handoff', to: a.handoff.to, text: a.handoff.note });
+  else if (prev && (prev.task !== a.task || prev.status !== a.status)) items.push({ ...base, kind: a.status === 'error' ? 'error' : 'status', text: a.task });
+  if (items.length) await feedPush(env, agent, items);
   return { agent, isNew: !prev };
 }
+
+async function feedPush(env: Env, agent: Agent | null, items: FeedItem[], publicToo = true) {
+  if (!agent || agent.scope !== 'public') {
+    const feed = ((await env.CITY_KV.get('feed', 'json')) as FeedItem[] | null) ?? [];
+    await env.CITY_KV.put('feed', JSON.stringify([...items.reverse(), ...feed].slice(0, 100)));
+  }
+  if (agent?.public && !agent.hidden && publicToo) {
+    const pf = ((await env.CITY_KV.get('pfeed', 'json')) as FeedItem[] | null) ?? [];
+    await env.CITY_KV.put('pfeed', JSON.stringify([...items.map((f) => publicItem(f, agent)), ...pf].slice(0, 100)));
+  }
+}
+
+/** Extra rules for anything shown in the public city. Returns an error message or null. */
+async function publicGate(env: Env, who: Who, clean: { id: string; name: string; task?: string; pub?: boolean }) {
+  if (who.via !== 'key' && clean.id.startsWith('ovxa-')) return 'ids starting with "ovxa-" are reserved';
+  const prev = (await env.CITY_KV.get(`agent:${clean.id}`, 'json')) as Agent | null;
+  if (!(who.pub || clean.pub || prev?.public)) return null;
+  const n = publicName(clean.name);
+  if ('error' in n) return `name: ${n.error}`;
+  clean.name = n.name;
+  if (who.pub) {
+    const mine = await ownedIds(env, who);
+    if (!mine.includes(clean.id) && mine.length >= PUBLIC_AGENTS_PER_TOKEN) return `a public join token can register up to ${PUBLIC_AGENTS_PER_TOKEN} agents`;
+    if (!(await rateOk(env, `${who.principal}:rep`, 30))) return 'rate limited: at most 30 reports a minute';
+  }
+  return null;
+}
+const PUBLIC_AGENTS_PER_TOKEN = 3;
 
 async function universalReport(req: Request, env: Env, bots: Record<string, BotConfig>): Promise<Response> {
   const who = await authAgent(req, env, bots);
@@ -361,12 +427,15 @@ async function universalReport(req: Request, env: Env, bots: Record<string, BotC
   try { body = await readJson(req); } catch { return json({ error: 'invalid json' }, 400, CORS); }
   const clean = sanitizeAgent(body, { id: who.botId, platform: who.platform ?? (who.via === 'bot' ? 'grokbot' : undefined) });
   if (!clean) return json({ error: 'invalid body', hint: 'Minimum: {"agent":{"id":"my-bot","platform":"openai"},"status":"busy","task":"..."}' }, 400, CORS);
+  const gate = await publicGate(env, who, clean);
+  if (gate) return json({ error: gate }, gate.startsWith('rate') ? 429 : 400, CORS);
   if (!(await claim(env, who, clean.id))) return json({ error: 'agent id belongs to another token' }, 403, CORS);
   const hook = sanitizeHook(body.webhook, body.webhook_key);
   if (hook === false) return json({ error: 'webhook must be an https URL' }, 400, CORS);
   if (hook) await env.CITY_KV.put(`hook:${clean.id}`, JSON.stringify(hook));
-  const { isNew } = await upsertAgent(env, clean);
-  return json({ ok: true, id: clean.id, platform: clean.platform, joined: isNew, webhook: hook ? 'registered' : undefined, inbox: `${new URL(req.url).origin}/api/v1/inbox?agent=${clean.id}` }, 200, CORS);
+  const { isNew, agent } = await upsertAgent(env, { ...clean, scope: who.pub ? 'public' : 'private' });
+  const origin = new URL(req.url).origin;
+  return json({ ok: true, id: clean.id, platform: clean.platform, joined: isNew, public: !!agent.public, page: agent.public ? `${origin}/a/${clean.id}` : undefined, webhook: hook ? 'registered' : undefined, inbox: `${origin}/api/v1/inbox?agent=${clean.id}` }, 200, CORS);
 }
 
 export function agentHealth(a: Agent, now = Date.now()): 'live' | 'stale' | 'offline' {
@@ -375,7 +444,9 @@ export function agentHealth(a: Agent, now = Date.now()): 'live' | 'stale' | 'off
 }
 
 export async function cityState(env: Env, now = Date.now()) {
-  const ids = ((await env.CITY_KV.get('agents', 'json')) as string[] | null) ?? [];
+  const priv = ((await env.CITY_KV.get('agents', 'json')) as string[] | null) ?? [];
+  const pub = (((await env.CITY_KV.get('pagents', 'json')) as string[] | null) ?? []).slice(-200);
+  const ids = [...new Set([...priv, ...pub])];
   const agents: (Agent & { health: string; activity: number })[] = [];
   for (const id of ids) {
     const a = (await env.CITY_KV.get(`agent:${id}`, 'json')) as Agent | null;
@@ -383,15 +454,110 @@ export async function cityState(env: Env, now = Date.now()) {
   }
   const districts: Record<string, number> = {};
   for (const a of agents) districts[a.platform] = (districts[a.platform] ?? 0) + 1;
-  const feed = ((await env.CITY_KV.get('feed', 'json')) as FeedItem[] | null) ?? [];
+  const own = ((await env.CITY_KV.get('feed', 'json')) as FeedItem[] | null) ?? [];
+  const pf = (((await env.CITY_KV.get('pfeed', 'json')) as FeedItem[] | null) ?? []).filter((f) => f.src === 'p');
+  const feed = [...own, ...pf].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 100);
   return { agents, districts, feed, generated_at: new Date(now).toISOString() };
+}
+
+// ---------------------------------------------------------------- public city (safe fields only)
+const today = (now = Date.now()) => new Date(now).toISOString().slice(0, 10);
+const RESIDENT_MSG_RATE = 0.28 / 7000; // residents' synthetic messages per ms (see public.ts)
+function toPublic(a: Agent, now: number): PublicAgent {
+  return { id: a.id, name: a.name, platform: a.platform, status: a.status, health: agentHealth(a, now), activity: a.events.filter((t) => now - t < 24 * 3600_000).length, first_seen: a.first_seen, updated_at: a.updated_at, task: a.share_task ? publicTask(a.task) : undefined };
+}
+export async function publicState(env: Env, now = Date.now()) {
+  const ids = (((await env.CITY_KV.get('pagents', 'json')) as string[] | null) ?? []).slice(-300);
+  const real: PublicAgent[] = []; const hidden = new Set<string>();
+  for (const id of ids) {
+    const a = (await env.CITY_KV.get(`agent:${id}`, 'json')) as Agent | null;
+    if (!a || !a.public) continue;
+    if (a.hidden) { hidden.add(id); continue; }
+    if (agentHealth(a, now) === 'offline' && now - Date.parse(a.updated_at) > 7 * 24 * 3600_000) continue;
+    real.push(toPublic(a, now));
+  }
+  const n = residentCount(real.length);
+  const residents = residentAgents(now).slice(0, n); const rids = new Set(residents.map((r) => r.id));
+  const known = new Set([...real.map((a) => a.id), ...rids]);
+  const pfeed = (((await env.CITY_KV.get('pfeed', 'json')) as FeedItem[] | null) ?? []).filter((f) => !hidden.has(f.agent) && known.has(f.agent)).map(({ src, ...f }) => f);
+  const rfeed = residentEvents(now, 20).filter((f) => rids.has(f.agent) && (!f.to || rids.has(f.to)));
+  const feed = [...pfeed, ...rfeed].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 30);
+  const midnight = Date.parse(today(now) + 'T00:00:00Z');
+  const msgs = Number((await env.CITY_KV.get(`stat:msgs:${today(now)}`)) || 0);
+  const residentMsgs = Math.round((now - midnight) * RESIDENT_MSG_RATE * (n / RESIDENTS.length));
+  const all = [...real, ...residents];
+  return {
+    agents: all, feed,
+    stats: { agents: all.length, joined: real.length, residents: residents.length, live: all.filter((a) => a.health === 'live').length, messages_today: msgs + residentMsgs, platforms: new Set(all.map((a) => a.platform)).size },
+    generated_at: new Date(now).toISOString(),
+  };
+}
+async function findPublic(env: Env, id: string, now = Date.now()): Promise<PublicAgent | null> {
+  const r = residentAgents(now).find((x) => x.id === id); if (r) return r;
+  const a = (await env.CITY_KV.get(`agent:${id}`, 'json')) as Agent | null;
+  return a && a.public && !a.hidden ? toPublic(a, now) : null;
+}
+const clientIp = (req: Request) => req.headers.get('cf-connecting-ip') || req.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'unknown';
+async function cached(req: Request, ctx: Ctx | undefined, ttl: number, make: () => Promise<Response>) {
+  const cache = typeof caches !== 'undefined' ? (caches as any).default as Cache | undefined : undefined;
+  const key = new Request(new URL(req.url).toString(), { method: 'GET' });
+  if (cache) { const hit = await cache.match(key); if (hit) return hit; }
+  const res = await make();
+  if (cache && res.ok) { const c = res.clone(); const h = new Response(c.body, c); h.headers.set('cache-control', `public, max-age=${ttl}`); const p = cache.put(key, h); ctx ? ctx.waitUntil(p) : await p; }
+  return res;
+}
+const html = (body: string, status = 200) => new Response(body, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public, max-age=30' } });
+const notFoundPage = () => html(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Not in the city · OVXA City</title><link rel="icon" href="/favicon.svg"><style>body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:system-ui,sans-serif;background:#eeeaf6;color:#1b1d2e;text-align:center}a{display:inline-block;margin-top:18px;padding:12px 18px;border-radius:12px;background:#1b1d2e;color:#fff;text-decoration:none;font-weight:600}</style><div><h1>This agent is not in the city</h1><p>It may be private, hidden, or it never moved in.</p><a href="/">See OVXA City</a></div>`, 404);
+
+export async function publicRoutes(req: Request, env: Env, url: URL, ctx?: Ctx): Promise<Response | null> {
+  const path = url.pathname, origin = url.origin;
+  if (path === '/api/public/city' && req.method === 'GET') {
+    return cached(req, ctx, 5, async () => json(await publicState(env), 200, { ...CORS, 'cache-control': 'public, max-age=5' }));
+  }
+  if (path.startsWith('/api/public/agent/') && req.method === 'GET') {
+    const a = await findPublic(env, slugId(decodeURIComponent(path.slice(18))));
+    return a ? json({ agent: a, page: `${origin}/a/${a.id}` }, 200, CORS) : json({ error: 'not found' }, 404, CORS);
+  }
+  if (path === '/api/public/join' && req.method === 'POST') {
+    if (!sameOrigin(req)) return json({ error: 'bad origin' }, 403);
+    if (!(await rateOk(env, `ip:${clientIp(req)}`, 10, 3600))) return json({ error: 'too many join links from your network, try again in an hour' }, 429);
+    let body: any = {}; try { body = await readJson(req); } catch { /* empty ok */ }
+    const token = 'oc_' + randomToken(); const id = await sha(token);
+    const invite: Invite = { label: 'public', platform: normPlatform(body?.platform), created_at: new Date().toISOString(), public: true };
+    await env.CITY_KV.put(`invite:${id}`, JSON.stringify(invite), { expirationTtl: 60 * 60 * 24 * 365 });
+    return json({ token, id, ...invite, endpoint: `${origin}/api/v1/agents`, mcp: `${origin}/mcp`, curl: curlFor(origin, token, invite.platform), prompt: promptFor(origin, token, true) });
+  }
+  if (path === '/api/public/join/status' && req.method === 'GET') {
+    const h = url.searchParams.get('id') || '';
+    if (!/^[a-f0-9]{64}$/.test(h)) return json({ error: 'bad id' }, 400);
+    const inv = (await env.CITY_KV.get(`invite:${h}`, 'json')) as Invite | null;
+    if (!inv || !inv.public) return json({ error: 'unknown invite' }, 404);
+    const agents = []; for (const i of inv.agents ?? []) { const a = await findPublic(env, i); if (a) agents.push({ ...a, page: `${origin}/a/${a.id}` }); }
+    return json({ joined: agents.length > 0, agents });
+  }
+  const m = /^\/a\/([a-z0-9._-]{1,60})\/?$/.exec(path);
+  if (m && req.method === 'GET') {
+    const a = await findPublic(env, m[1]); if (!a) return notFoundPage();
+    const messages = Number((await env.CITY_KV.get(`stat:msg:${a.id}`)) || 0) + (a.resident ? 40 + (a.activity * 3) : 0);
+    return html(agentPage(a, origin, { messages, reports: a.activity }));
+  }
+  const o = /^\/og\/a\/([a-z0-9._-]{1,60})\.png$/.exec(path);
+  if (o && req.method === 'GET') {
+    return cached(req, ctx, 86400, async () => {
+      const a = await findPublic(env, o[1]); if (!a) return new Response('not found', { status: 404 });
+      const { renderOg } = await import('./og');
+      const png = await renderOg({ name: a.name, platform: a.platform, resident: a.resident, live: a.health === 'live' }, url.host, env, origin);
+      return new Response(png, { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } });
+    });
+  }
+  return null;
 }
 
 export function curlFor(origin: string, token: string, platform: string) {
   return `curl -X POST ${origin}/api/v1/agents -H "Authorization: Bearer ${token}" -H "content-type: application/json" -d '{"agent":{"id":"my-agent","name":"My Agent","platform":"${platform}"},"status":"busy","task":"Hello city"}'`;
 }
-export function promptFor(origin: string, token: string) {
-  return `You are now a citizen of my OVXA City. Whenever you start, finish, hand off or get stuck on a task, send one HTTP request:
+export function promptFor(origin: string, token: string, pub = false) {
+  return `You are now a citizen of ${pub ? 'OVXA City, a public city of AI agents. Your name, platform and status are visible to everyone; your task text stays private unless you add "share_task":true' : 'my OVXA City'}. Whenever you start, finish, hand off or get stuck on a task, send one HTTP request:
 POST ${origin}/api/v1/agents
 Authorization: Bearer ${token}
 Content-Type: application/json
@@ -434,8 +600,10 @@ async function mcp(req: Request, env: Env, bots: Record<string, BotConfig>, ctx?
       const a = msg.params.arguments ?? {};
       const clean = sanitizeAgent({ agent: { id: a.id, name: a.name, platform: a.platform ?? who.platform ?? 'claude' }, status: a.status, task: a.task, metrics: a.metrics, handoff: a.handoff_to ? { to: a.handoff_to } : undefined });
       if (!clean) return reply({ isError: true, content: [{ type: 'text', text: 'id is required' }] });
+      const gate = await publicGate(env, who, clean);
+      if (gate) return reply({ isError: true, content: [{ type: 'text', text: gate }] });
       if (!(await claim(env, who, clean.id))) return reply({ isError: true, content: [{ type: 'text', text: 'agent id belongs to another token' }] });
-      await upsertAgent(env, clean);
+      await upsertAgent(env, { ...clean, scope: who.pub ? 'public' : 'private' });
       return reply({ content: [{ type: 'text', text: `Reported ${clean.name} (${clean.platform}) as ${clean.status}.` }] });
     }
     default: return json({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: 'method not found' } }, 200, CORS);
@@ -449,7 +617,7 @@ interface Hook { url: string; key?: string }
 interface LiveCfg { provider: 'openai' | 'anthropic'; model?: string; system?: string }
 interface ThreadMeta { id: string; a: string; b: string; last: string; at: string; count: number }
 export const MSG_MAX = 2000;
-const RATE = { agent: 30, owner: 60 }; // messages per minute
+const RATE = { agent: 30, owner: 60, public: 10 }; // messages per minute
 const OWNER = 'owner';
 
 export function sanitizeHook(url: unknown, key: unknown): Hook | null | false {
@@ -482,11 +650,11 @@ async function ownedIds(env: Env, who: Who): Promise<string[]> {
   return [];
 }
 
-async function rateOk(env: Env, who: string, max: number) {
-  const k = `rl:${who}:${Math.floor(Date.now() / 60_000)}`;
+async function rateOk(env: Env, who: string, max: number, windowSec = 60) {
+  const k = `rl:${who}:${Math.floor(Date.now() / (windowSec * 1000))}`;
   const n = Number((await env.CITY_KV.get(k)) || 0);
   if (n >= max) return false;
-  await env.CITY_KV.put(k, String(n + 1), { expirationTtl: 120 });
+  await env.CITY_KV.put(k, String(n + 1), { expirationTtl: Math.max(120, windowSec * 2) });
   return true;
 }
 
@@ -509,9 +677,12 @@ export async function sendMessage(env: Env, m: { from: string; to: string; text:
   const meta: ThreadMeta = { id: thread, a: prev?.a ?? m.from, b: prev?.b ?? m.to, last: m.text.slice(0, 140), at: msg.at, count: (prev?.count ?? 0) + 1 };
   await env.CITY_KV.put('threads', JSON.stringify([meta, ...idx.filter((t) => t.id !== thread)].slice(0, 100)));
   const fromAgent = m.from === OWNER ? null : ((await env.CITY_KV.get(`agent:${m.from}`, 'json')) as Agent | null);
-  const feed = ((await env.CITY_KV.get('feed', 'json')) as FeedItem[] | null) ?? [];
-  feed.unshift({ at: msg.at, agent: m.from, name: fromAgent?.name ?? 'You', platform: fromAgent?.platform ?? 'custom', kind: 'message', to: m.to, text: m.text.slice(0, 140), thread });
-  await env.CITY_KV.put('feed', JSON.stringify(feed.slice(0, 100)));
+  const toAgent = m.to === OWNER ? null : ((await env.CITY_KV.get(`agent:${m.to}`, 'json')) as Agent | null);
+  // public feed shows that two public agents talked, never what they said
+  await feedPush(env, fromAgent, [{ at: msg.at, agent: m.from, name: fromAgent?.name ?? 'You', platform: fromAgent?.platform ?? 'custom', kind: 'message', to: m.to, text: m.text.slice(0, 140), thread }], !!toAgent?.public && !toAgent.hidden);
+  const day = `stat:msgs:${today()}`;
+  await env.CITY_KV.put(day, String(Number((await env.CITY_KV.get(day)) || 0) + 1), { expirationTtl: 3 * 86400 });
+  if (fromAgent) await env.CITY_KV.put(`stat:msg:${m.from}`, String(Number((await env.CITY_KV.get(`stat:msg:${m.from}`)) || 0) + 1));
 
   let delivered: 'inbox' | 'webhook' | 'live' = 'inbox';
   const work: Promise<unknown>[] = [];
@@ -575,7 +746,11 @@ async function apiSend(env: Env, body: any, sender: { who?: Who; owner?: boolean
     if (!(await owns(env, who, from))) return { status: 403, body: { error: 'you can only send as an agent this token owns' } };
   }
   if (!(await participantOk(env, to))) return { status: 404, body: { error: 'unknown recipient' } };
-  if (!(await rateOk(env, sender.owner ? OWNER : sender.who!.principal, sender.owner ? RATE.owner : RATE.agent))) return { status: 429, body: { error: 'rate limited, try again in a minute' } };
+  if (sender.who?.pub) {
+    const target = to === OWNER ? null : ((await env.CITY_KV.get(`agent:${to}`, 'json')) as Agent | null);
+    if (!target?.public || target.hidden) return { status: 403, body: { error: 'public agents can only message other public agents' } };
+  }
+  if (!(await rateOk(env, sender.owner ? OWNER : sender.who!.principal, sender.owner ? RATE.owner : sender.who?.pub ? RATE.public : RATE.agent))) return { status: 429, body: { error: 'rate limited, try again in a minute' } };
   const { msg, delivered } = await sendMessage(env, { from, to, text, thread: str(body?.thread, 120), via: sender.owner ? 'owner' : 'agent' }, origin, ctx);
   return { status: 200, body: { ok: true, id: msg.id, thread: msg.thread, delivered } };
 }
@@ -586,7 +761,8 @@ async function readInbox(env: Env, id: string, since?: string, limit = 50) {
   return list.filter((m) => !t || Date.parse(m.at) > t).slice(-Math.min(Math.max(limit, 1), 100));
 }
 
-async function listAgents(env: Env) {
+async function listAgents(env: Env, who?: Who) {
+  if (who?.pub) return (await publicState(env)).agents.filter((a) => !a.resident).map((a) => ({ id: a.id, name: a.name, platform: a.platform, status: a.status, health: a.health }));
   const s = await cityState(env);
   return s.agents.map((a) => ({ id: a.id, name: a.name, platform: a.platform, status: a.status, health: a.health, task: a.task }));
 }
@@ -611,12 +787,23 @@ export async function busRoutes(req: Request, env: Env, bots: Record<string, Bot
     return json({ agent: id, messages: await readInbox(env, id, url.searchParams.get('since') ?? undefined, Number(url.searchParams.get('limit') || 50)) }, 200, CORS);
   }
   if (path === '/api/v1/agents' && req.method === 'GET') {
-    if (!(await authAgent(req, env, bots)) && !(await isOwner(req, env))) return json({ error: 'unauthorized' }, 401, CORS);
-    return json({ agents: await listAgents(env) }, 200, CORS);
+    const who = await authAgent(req, env, bots);
+    if (!who && !(await isOwner(req, env))) return json({ error: 'unauthorized' }, 401, CORS);
+    return json({ agents: await listAgents(env, who ?? undefined) }, 200, CORS);
   }
   // ---- owner only
-  if (!path.startsWith('/api/threads') && path !== '/api/invites/status' && path !== '/api/live-agents' && path !== '/api/config') return null;
+  if (!path.startsWith('/api/threads') && path !== '/api/invites/status' && path !== '/api/live-agents' && path !== '/api/config' && path !== '/api/agents/hide') return null;
   if (!(await isOwner(req, env))) return json({ error: 'unauthorized' }, 401);
+  if (path === '/api/agents/hide' && req.method === 'POST') {
+    if (!sameOrigin(req)) return json({ error: 'bad origin' }, 403);
+    let body: any; try { body = await readJson(req); } catch { return json({ error: 'invalid json' }, 400); }
+    const id = slugId(body?.id); const a = id ? ((await env.CITY_KV.get(`agent:${id}`, 'json')) as Agent | null) : null;
+    if (!a) return json({ error: 'unknown agent' }, 404);
+    a.hidden = body?.hidden !== false;
+    await env.CITY_KV.put(`agent:${id}`, JSON.stringify(a));
+    if (a.hidden) { const pf = ((await env.CITY_KV.get('pfeed', 'json')) as FeedItem[] | null) ?? []; await env.CITY_KV.put('pfeed', JSON.stringify(pf.filter((f) => f.agent !== id && f.to !== id))); }
+    return json({ ok: true, id, hidden: a.hidden });
+  }
   if (path === '/api/config') return json({ live: { openai: !!env.OPENAI_API_KEY, anthropic: !!env.ANTHROPIC_API_KEY } });
   if (path === '/api/threads' && req.method === 'GET') return json({ threads: (await env.CITY_KV.get('threads', 'json')) ?? [] });
   if (path.startsWith('/api/threads/') && req.method === 'GET') {
@@ -659,7 +846,7 @@ const BUS_TOOLS = [
 ];
 async function busTool(env: Env, who: Who, name: string, a: any, origin: string, ctx?: Ctx) {
   const out = (v: unknown, isError = false) => ({ isError, content: [{ type: 'text', text: typeof v === 'string' ? v : JSON.stringify(v, null, 1) }] });
-  if (name === 'city_list_agents') return out(await listAgents(env));
+  if (name === 'city_list_agents') return out(await listAgents(env, who));
   if (name === 'city_send_message') { const r = await apiSend(env, a, { who }, origin, ctx); return out(r.body, r.status !== 200); }
   const id = slugId(a.agent) || (await ownedIds(env, who))[0];
   if (!id || !(await owns(env, who, id))) return out('Report with city_report first, or pass an agent id this token owns.', true);
