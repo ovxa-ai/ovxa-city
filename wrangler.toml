@@ -1,0 +1,22 @@
+# OVXA City — one Worker serves the static app (dist/) and the /api routes.
+# Secrets are NOT stored here. Set them with:
+#   npx wrangler secret put OWNER_PASSWORD
+#   npx wrangler secret put SESSION_SECRET
+#   npx wrangler secret put BOTS          # JSON, see README
+name = "ovxa-city"
+main = "worker/src/index.ts"
+compatibility_date = "2024-11-01"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[[kv_namespaces]]
+binding = "CITY_KV"
+# Create with: npx wrangler kv namespace create CITY_KV  — then paste the id below.
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
+[vars]
+# Optional: protect the site with Cloudflare Access and set your email to skip the password.
+# ACCESS_EMAIL = "you@example.com"

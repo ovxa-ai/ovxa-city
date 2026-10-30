@@ -1,0 +1,4 @@
+# Copy to .dev.vars for `npm run worker:dev` (never commit .dev.vars)
+OWNER_PASSWORD=change-me
+SESSION_SECRET=generate-a-long-random-string
+BOTS={"grok":{"name":"Grok Bot","role":"router","token":"bot-token-1","webhook":"https://example.invalid/hook","webhookKey":"hook-key-1"}}

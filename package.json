@@ -1,0 +1,25 @@
+{
+  "name": "ovxa-city",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Your Grok Bot agents as a living isometric city. Approve bot requests from Town Hall.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && tsc -p worker --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "worker:dev": "wrangler dev",
+    "deploy": "npm run build && wrangler deploy",
+    "typecheck": "tsc --noEmit && tsc -p worker --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250101.0",
+    "gsap": "^3.12.5",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vitest": "^2.1.4",
+    "wrangler": "^3.90.0"
+  }
+}
