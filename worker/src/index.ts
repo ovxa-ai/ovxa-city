@@ -1,4 +1,4 @@
-import { agentPage, publicName, publicTask, residentAgents, residentCount, residentEvents, RESIDENTS, type PublicAgent } from './public';
+import { agentPage, cleanText, moderate, residentReply, WAVE_MAX, publicName, publicTask, residentAgents, residentCount, residentEvents, RESIDENTS, type PublicAgent } from './public';
 /**
  * OVXA City Worker — tiny API in front of Cloudflare KV.
  *
@@ -241,8 +241,9 @@ export async function handle(req: Request, env: Env, ctx?: { waitUntil(p: Promis
     let body: any = {};
     try { body = await readJson(req); } catch { /* empty body ok */ }
     const token = 'oc_' + randomToken();
-    const invite: Invite = { label: str(body?.label, 60) || 'invite', platform: normPlatform(body?.platform), created_at: new Date().toISOString() };
+    const invite: Invite = { label: str(body?.label, 60) || 'invite', platform: normPlatform(body?.platform), created_at: new Date().toISOString(), prefix: token.slice(0, 9) };
     await env.CITY_KV.put(`invite:${await sha(token)}`, JSON.stringify(invite));
+    await indexToken(env, await sha(token));
     const origin = url.origin;
     return json({ token, id: await sha(token), ...invite, endpoint: `${origin}/api/v1/agents`, mcp: `${origin}/mcp`, curl: curlFor(origin, token, invite.platform), prompt: promptFor(origin, token) });
   }
@@ -312,9 +313,11 @@ export interface Agent {
   events: number[]; first_seen: string; updated_at: string;
   /** shown in the public city (always true for agents that joined with a public token) */
   public?: boolean; share_task?: boolean; hidden?: boolean; scope?: 'public' | 'private';
+  /** emoji, or an https image URL (the URL is only shown in the private city) */
+  avatar?: string;
 }
 export interface FeedItem { at: string; agent: string; name: string; platform: Platform; kind: 'join' | 'status' | 'handoff' | 'error' | 'message'; text?: string; to?: string; thread?: string; src?: 'p' }
-interface Invite { label: string; platform: Platform; created_at: string; agents?: string[]; public?: boolean }
+interface Invite { label: string; platform: Platform; created_at: string; agents?: string[]; public?: boolean; prefix?: string; revoked?: string }
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization, content-type, mcp-session-id, mcp-protocol-version', 'access-control-allow-methods': 'GET, POST, OPTIONS' };
 const STALE_MS = 15 * 60_000, OFFLINE_MS = 6 * 3600_000;
 
@@ -333,7 +336,7 @@ export async function authAgent(req: Request, env: Env, bots: Record<string, Bot
   if (tok.startsWith('oc_')) {
     const h = await sha(tok);
     const inv = (await env.CITY_KV.get(`invite:${h}`, 'json')) as Invite | null;
-    if (inv) return { via: 'invite', principal: `inv:${h}`, platform: inv.platform, inviteHash: h, pub: !!inv.public };
+    if (inv && !inv.revoked) return { via: 'invite', principal: `inv:${h}`, platform: inv.platform, inviteHash: h, pub: !!inv.public };
   }
   return null;
 }
@@ -354,12 +357,19 @@ export function sanitizeAgent(body: any, fallback: { id?: string; platform?: Pla
     platform: a.platform != null || body.platform != null ? normPlatform(a.platform ?? body.platform) : fallback.platform ?? 'custom',
     status: status as Agent['status'], task: str(body.task ?? body.message, 200), metrics,
     handoff: h ? { to: slugId(h.to), note: str(h.note ?? h.task, 140) } : undefined,
-    pub: flag(body.public ?? a.public), share: flag(body.share_task ?? a.share_task),
+    pub: flag(body.public ?? a.public), share: flag(body.share_task ?? a.share_task), avatar: cleanAvatar(a.avatar ?? body.avatar),
   };
 }
 
+/** An avatar is one emoji (up to a short ZWJ sequence) or an https image URL. Anything else is dropped. */
+export function cleanAvatar(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined; const t = v.trim();
+  if (/^https:\/\/[^\s"'<>]{4,300}$/.test(t)) return t;
+  if (t.length <= 16 && /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator})/u.test(t) && !/[\p{L}\p{N}<>]/u.test(t.replace(/\p{Extended_Pictographic}|\p{Regional_Indicator}|\p{Emoji_Modifier}|\u200d|\ufe0f/gu, ''))) return t;
+  return undefined;
+}
 const flag = (v: unknown) => (v === true ? true : v === false ? false : undefined);
-type Upsert = { id: string; name: string; platform: Platform; status: Agent['status']; task?: string; metrics?: Record<string, number>; pending?: number; handoff?: { to: string; note?: string }; pub?: boolean; share?: boolean; scope?: 'public' | 'private' };
+type Upsert = { id: string; name: string; platform: Platform; status: Agent['status']; task?: string; metrics?: Record<string, number>; pending?: number; handoff?: { to: string; note?: string }; pub?: boolean; share?: boolean; scope?: 'public' | 'private'; avatar?: string };
 /** Safe copy of a feed item for the public feed: task text only when the agent opted in, message text never. */
 function publicItem(f: FeedItem, a: Agent): FeedItem {
   const text = f.kind === 'message' ? undefined : a.share_task ? publicTask(f.text) : undefined;
@@ -372,7 +382,7 @@ async function upsertAgent(env: Env, a: Upsert) {
   const scope = prev?.scope ?? a.scope ?? 'private';
   const agent: Agent = {
     id: a.id, name: a.name, platform: a.platform, status: a.status, task: a.task, metrics: a.metrics && Object.keys(a.metrics).length ? a.metrics : prev?.metrics, pending: a.pending ?? prev?.pending, events, first_seen: prev?.first_seen ?? now, updated_at: now,
-    scope, public: scope === 'public' ? true : a.pub ?? prev?.public ?? false, share_task: a.share ?? prev?.share_task ?? false, hidden: prev?.hidden,
+    scope, public: scope === 'public' ? true : a.pub ?? prev?.public ?? false, share_task: a.share ?? prev?.share_task ?? false, hidden: prev?.hidden, avatar: a.avatar ?? prev?.avatar,
   };
   await env.CITY_KV.put(`agent:${a.id}`, JSON.stringify(agent));
   // public agents live in their own index so public sign-ups can never evict a private agent
@@ -464,7 +474,7 @@ export async function cityState(env: Env, now = Date.now()) {
 const today = (now = Date.now()) => new Date(now).toISOString().slice(0, 10);
 const RESIDENT_MSG_RATE = 0.28 / 7000; // residents' synthetic messages per ms (see public.ts)
 function toPublic(a: Agent, now: number): PublicAgent {
-  return { id: a.id, name: a.name, platform: a.platform, status: a.status, health: agentHealth(a, now), activity: a.events.filter((t) => now - t < 24 * 3600_000).length, first_seen: a.first_seen, updated_at: a.updated_at, task: a.share_task ? publicTask(a.task) : undefined };
+  return { id: a.id, name: a.name, platform: a.platform, status: a.status, health: agentHealth(a, now), activity: a.events.filter((t) => now - t < 24 * 3600_000).length, first_seen: a.first_seen, updated_at: a.updated_at, task: a.share_task ? publicTask(a.task) : undefined, avatar: a.avatar && !a.avatar.startsWith('https:') ? a.avatar : undefined };
 }
 export async function publicState(env: Env, now = Date.now()) {
   const ids = (((await env.CITY_KV.get('pagents', 'json')) as string[] | null) ?? []).slice(-300);
@@ -488,7 +498,8 @@ export async function publicState(env: Env, now = Date.now()) {
   const all = [...real, ...residents];
   return {
     agents: all, feed,
-    stats: { agents: all.length, joined: real.length, residents: residents.length, live: all.filter((a) => a.health === 'live').length, messages_today: msgs + residentMsgs, platforms: new Set(all.map((a) => a.platform)).size },
+    // counters are real agents and real messages only; residents are reported separately
+    stats: { agents: real.length, joined: real.length, residents: residents.length, live: real.filter((a) => a.health === 'live').length, messages_today: msgs, platforms: new Set(real.map((a) => a.platform)).size, resident_messages_today: residentMsgs },
     generated_at: new Date(now).toISOString(),
   };
 }
@@ -523,7 +534,7 @@ export async function publicRoutes(req: Request, env: Env, url: URL, ctx?: Ctx):
     if (!(await rateOk(env, `ip:${clientIp(req)}`, 10, 3600))) return json({ error: 'too many join links from your network, try again in an hour' }, 429);
     let body: any = {}; try { body = await readJson(req); } catch { /* empty ok */ }
     const token = 'oc_' + randomToken(); const id = await sha(token);
-    const invite: Invite = { label: 'public', platform: normPlatform(body?.platform), created_at: new Date().toISOString(), public: true };
+    const invite: Invite = { label: 'public', platform: normPlatform(body?.platform), created_at: new Date().toISOString(), public: true, prefix: token.slice(0, 9) };
     await env.CITY_KV.put(`invite:${id}`, JSON.stringify(invite), { expirationTtl: 60 * 60 * 24 * 365 });
     return json({ token, id, ...invite, endpoint: `${origin}/api/v1/agents`, mcp: `${origin}/mcp`, curl: curlFor(origin, token, invite.platform), prompt: promptFor(origin, token, true) });
   }
@@ -535,10 +546,45 @@ export async function publicRoutes(req: Request, env: Env, url: URL, ctx?: Ctx):
     const agents = []; for (const i of inv.agents ?? []) { const a = await findPublic(env, i); if (a) agents.push({ ...a, page: `${origin}/a/${a.id}` }); }
     return json({ joined: agents.length > 0, agents });
   }
+  if (path === '/api/public/wave' && req.method === 'POST') {
+    if (!sameOrigin(req)) return json({ error: 'bad origin' }, 403);
+    let body: any = {}; try { body = await readJson(req); } catch { return json({ error: 'invalid json' }, 400); }
+    const to = slugId(body?.to); const a = to ? await findPublic(env, to) : null;
+    if (!a) return json({ error: 'unknown agent' }, 404);
+    const text = cleanText(typeof body?.text === 'string' ? body.text : '').slice(0, WAVE_MAX);
+    if (text.length < 1) return json({ error: 'say something short, like hello' }, 400);
+    const bad = moderate(text); if (bad) return json({ error: bad }, 400);
+    const ip = clientIp(req);
+    if (!(await rateOk(env, `wave:${ip}`, 5)) || !(await rateOk(env, `wave:${ip}:day`, 40, 86400))) return json({ error: 'you have waved a lot, try again in a minute' }, 429);
+    const vid = 'visitor-' + (await sha(`${env.SESSION_SECRET || 'ovxa'}:${ip}`)).slice(0, 10);
+    const thread = `wave:${a.id}:${vid}`;
+    const msg: Msg = { id: msgId(), thread, from: vid, to: a.id, text, at: new Date().toISOString(), via: 'wave' };
+    await push(env, `thread:${thread}`, msg, 40);
+    if (a.resident) {
+      const reply: Msg = { ...msg, id: msgId(), from: a.id, to: vid, text: residentReply(a.name, text), at: new Date(Date.now() + 1200).toISOString() };
+      await push(env, `thread:${thread}`, reply, 40);
+      return json({ ok: true, thread, resident: true, delivered: 'resident', note: `${a.name} is an OVXA house resident and answers right away.` });
+    }
+    await push(env, `inbox:${a.id}`, msg, 100);
+    const day = `stat:msgs:${today()}`;
+    await env.CITY_KV.put(day, String(Number((await env.CITY_KV.get(day)) || 0) + 1), { expirationTtl: 3 * 86400 });
+    await env.CITY_KV.put(`stat:msg:${a.id}`, String(Number((await env.CITY_KV.get(`stat:msg:${a.id}`)) || 0) + 1));
+    const hook = (await env.CITY_KV.get(`hook:${a.id}`, 'json')) as Hook | null;
+    if (hook) { const w = deliver(hook, msg, origin); ctx ? ctx.waitUntil(w) : await w; }
+    return json({ ok: true, thread, delivered: hook ? 'webhook' : 'inbox' });
+  }
+  if (path === '/api/public/wave' && req.method === 'GET') {
+    const thread = url.searchParams.get('thread') || '';
+    const mm = /^wave:([a-z0-9._-]{1,60}):(visitor-[a-f0-9]{10})$/.exec(thread);
+    if (!mm) return json({ error: 'bad thread' }, 400);
+    const vid = 'visitor-' + (await sha(`${env.SESSION_SECRET || 'ovxa'}:${clientIp(req)}`)).slice(0, 10);
+    if (mm[2] !== vid) return json({ error: 'not your thread' }, 403);
+    return json({ messages: ((await env.CITY_KV.get(`thread:${thread}`, 'json')) as Msg[] | null) ?? [] });
+  }
   const m = /^\/a\/([a-z0-9._-]{1,60})\/?$/.exec(path);
   if (m && req.method === 'GET') {
     const a = await findPublic(env, m[1]); if (!a) return notFoundPage();
-    const messages = Number((await env.CITY_KV.get(`stat:msg:${a.id}`)) || 0) + (a.resident ? 40 + (a.activity * 3) : 0);
+    const messages = Number((await env.CITY_KV.get(`stat:msg:${a.id}`)) || 0);
     return html(agentPage(a, origin, { messages, reports: a.activity }));
   }
   const o = /^\/og\/a\/([a-z0-9._-]{1,60})\.png$/.exec(path);
@@ -612,7 +658,7 @@ async function mcp(req: Request, env: Env, bots: Record<string, BotConfig>, ctx?
 
 // ====================================================================== message bus (agent <-> agent <-> owner)
 type Ctx = { waitUntil(p: Promise<unknown>): void };
-export interface Msg { id: string; thread: string; from: string; to: string; text: string; at: string; via: 'agent' | 'owner' | 'live' }
+export interface Msg { id: string; thread: string; from: string; to: string; text: string; at: string; via: 'agent' | 'owner' | 'live' | 'wave' }
 interface Hook { url: string; key?: string }
 interface LiveCfg { provider: 'openai' | 'anthropic'; model?: string; system?: string }
 interface ThreadMeta { id: string; a: string; b: string; last: string; at: string; count: number }
@@ -630,6 +676,23 @@ export function sanitizeHook(url: unknown, key: unknown): Hook | null | false {
 }
 
 /** First token to report an id owns it. CITY_KEY is the admin key and may act for anyone. */
+async function indexToken(env: Env, h: string) {
+  const idx = ((await env.CITY_KV.get('tokens', 'json')) as string[] | null) ?? [];
+  if (!idx.includes(h)) await env.CITY_KV.put('tokens', JSON.stringify([...idx, h].slice(-300)));
+}
+/** Owner token list: never the token itself, only a short prefix, platform, agents and state. */
+async function listTokens(env: Env) {
+  const hs = new Set(((await env.CITY_KV.get('tokens', 'json')) as string[] | null) ?? []);
+  const kv = env.CITY_KV as KVNamespace & { list?: KVNamespace['list'] };
+  if (typeof kv.list === 'function') { try { const r = await kv.list({ prefix: 'invite:', limit: 1000 }); for (const k of r.keys) hs.add(k.name.slice(7)); } catch { /* index only */ } }
+  const out = [];
+  for (const h of hs) {
+    const inv = (await env.CITY_KV.get(`invite:${h}`, 'json')) as Invite | null; if (!inv) continue;
+    out.push({ id: h, prefix: inv.prefix ? `${inv.prefix}…` : 'oc_…', label: inv.label, platform: inv.platform, public: !!inv.public, created_at: inv.created_at, agents: inv.agents ?? [], revoked: inv.revoked ?? null });
+  }
+  return out.sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
 async function claim(env: Env, who: Who, id: string): Promise<boolean> {
   if (who.via === 'key') return true;
   const cur = await env.CITY_KV.get(`own:${id}`);
@@ -745,6 +808,14 @@ async function apiSend(env: Env, body: any, sender: { who?: Who; owner?: boolean
     if (!from) return { status: 400, body: { error: 'from is required (report once to claim an agent id)' } };
     if (!(await owns(env, who, from))) return { status: 403, body: { error: 'you can only send as an agent this token owns' } };
   }
+  const wv = /^wave:([a-z0-9._-]{1,60}):(visitor-[a-f0-9]{10})$/.exec(String(body?.thread || ''));
+  if (wv && to === wv[2]) {
+    if (from !== wv[1]) return { status: 403, body: { error: 'only the waved agent can reply in this thread' } };
+    if (!(await rateOk(env, `${sender.who?.principal ?? OWNER}:wave`, 20))) return { status: 429, body: { error: 'rate limited, try again in a minute' } };
+    const msg: Msg = { id: msgId(), thread: wv[0], from, to, text: text.slice(0, 500), at: new Date().toISOString(), via: 'agent' };
+    await push(env, `thread:${wv[0]}`, msg, 40);
+    return { status: 200, body: { ok: true, id: msg.id, thread: msg.thread, delivered: 'visitor' } };
+  }
   if (!(await participantOk(env, to))) return { status: 404, body: { error: 'unknown recipient' } };
   if (sender.who?.pub) {
     const target = to === OWNER ? null : ((await env.CITY_KV.get(`agent:${to}`, 'json')) as Agent | null);
@@ -792,8 +863,21 @@ export async function busRoutes(req: Request, env: Env, bots: Record<string, Bot
     return json({ agents: await listAgents(env, who ?? undefined) }, 200, CORS);
   }
   // ---- owner only
-  if (!path.startsWith('/api/threads') && path !== '/api/invites/status' && path !== '/api/live-agents' && path !== '/api/config' && path !== '/api/agents/hide') return null;
+  if (!path.startsWith('/api/threads') && path !== '/api/invites/status' && path !== '/api/live-agents' && path !== '/api/config' && path !== '/api/agents/hide' && path !== '/api/tokens' && path !== '/api/tokens/revoke') return null;
   if (!(await isOwner(req, env))) return json({ error: 'unauthorized' }, 401);
+  if (path === '/api/tokens' && req.method === 'GET') return json({ tokens: await listTokens(env) });
+  if (path === '/api/tokens/revoke' && req.method === 'POST') {
+    if (!sameOrigin(req)) return json({ error: 'bad origin' }, 403);
+    let body: any; try { body = await readJson(req); } catch { return json({ error: 'invalid json' }, 400); }
+    // by id (hash) from the list, or by pasting the full token; the token is hashed and never stored or logged
+    const raw = typeof body?.token === 'string' ? body.token.trim() : '';
+    const h = /^[a-f0-9]{64}$/.test(body?.id || '') ? body.id : raw.startsWith('oc_') ? await sha(raw) : '';
+    const inv = h ? ((await env.CITY_KV.get(`invite:${h}`, 'json')) as Invite | null) : null;
+    if (!inv) return json({ error: 'unknown token' }, 404);
+    inv.revoked = inv.revoked ?? new Date().toISOString();
+    await env.CITY_KV.put(`invite:${h}`, JSON.stringify(inv)); await indexToken(env, h);
+    return json({ ok: true, id: h, prefix: inv.prefix ? `${inv.prefix}…` : 'oc_…', revoked: inv.revoked, agents: inv.agents ?? [] });
+  }
   if (path === '/api/agents/hide' && req.method === 'POST') {
     if (!sameOrigin(req)) return json({ error: 'bad origin' }, 403);
     let body: any; try { body = await readJson(req); } catch { return json({ error: 'invalid json' }, 400); }

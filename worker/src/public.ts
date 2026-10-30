@@ -3,6 +3,7 @@
  * Everything here returns only fields that are safe to show to anyone on the internet.
  */
 import type { Agent, FeedItem, Platform } from './index';
+import { avatarUri } from '../../src/avatar';
 
 // ---------------------------------------------------------------- moderation
 const BAD = ['fuck', 'shit', 'cunt', 'nigger', 'nigga', 'faggot', 'fag', 'bitch', 'whore', 'slut', 'porn', 'xxx', 'rape', 'nazi', 'hitler', 'kike', 'retard', 'dick', 'cock', 'pussy', 'penis', 'vagina', 'anal', 'nude', 'nsfw', 'onlyfans', 'sex', 'heil', 'kkk', 'spic', 'chink', 'twat', 'wank', 'asshole', 'motherfucker', 'scam', 'casino', 'viagra', 'crypto giveaway'];
@@ -19,6 +20,10 @@ export function moderate(s: string): string | null {
   }
   return null;
 }
+export const WAVE_MAX = 140;
+const REPLIES = ['Hey {v}! 👋 Thanks for stopping by. I am {n}, one of the house residents.', 'Hi there! {n} here. Busy day in the city, but always happy to wave back. 🙂', 'Hello! Welcome to OVXA City. Bring your own agent and we can be neighbors.', 'Wave received! 🌆 {n} says hi. Want to see your agent on this map too? Tap Join.'];
+/** Canned, friendly reply from a house resident (no LLM, no cost). */
+export function residentReply(name: string, text: string) { let h = 0; for (const c of text) h = (h * 31 + c.charCodeAt(0)) >>> 0; return REPLIES[h % REPLIES.length].replace('{n}', name).replace('{v}', 'neighbor'); }
 export const PUBLIC_NAME_MAX = 32, PUBLIC_TASK_MAX = 120;
 /** Returns a clean public name or an error. */
 export function publicName(raw: string): { name: string } | { error: string } {
@@ -48,7 +53,7 @@ export const SPOT: Record<string, [number, number]> = { // building roof in the 
 const pl = (k: string) => PLAT[k] ?? PLAT.custom;
 
 // ---------------------------------------------------------------- residents (OVXA's own demo agents)
-export interface PublicAgent { id: string; name: string; platform: string; status: Agent['status']; health: 'live' | 'stale' | 'offline'; activity: number; first_seen: string; updated_at: string; task?: string; resident?: boolean }
+export interface PublicAgent { id: string; name: string; platform: string; status: Agent['status']; health: 'live' | 'stale' | 'offline'; activity: number; first_seen: string; updated_at: string; task?: string; resident?: boolean; avatar?: string }
 const R: [string, string, Platform][] = [
   ['atlas', 'Atlas', 'openai'], ['nova', 'Nova', 'claude'], ['pixel', 'Pixel', 'muse'], ['relay', 'Relay', 'grokbot'],
   ['scout', 'Scout', 'openclaw'], ['sage', 'Sage', 'langchain'], ['forge', 'Forge', 'crewai'], ['flux', 'Flux', 'n8n'],
@@ -134,7 +139,11 @@ a{color:inherit}.top{position:fixed;inset:0 0 auto;display:flex;align-items:cent
 .marker .tag{display:flex;align-items:center;gap:8px;padding:8px 12px 8px 8px;border-radius:14px;background:#fff;box-shadow:0 0 0 1px rgba(27,29,46,.06),0 16px 30px -12px rgba(27,29,46,.45);font-weight:700;font-size:14px}
 .marker .stem{width:2px;height:34px;background:linear-gradient(#fff,rgba(255,255,255,.2))}.marker .dot{width:12px;height:12px;border-radius:50%;background:${p.c};box-shadow:0 0 0 6px ${p.c}55,0 0 0 14px ${p.c}22;animation:pulse 2s infinite}
 @keyframes pop{from{opacity:0;transform:translate(-50%,-80%) scale(.6)}}@keyframes pulse{50%{box-shadow:0 0 0 9px ${p.c}33,0 0 0 20px ${p.c}11}}
-.av{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;font-size:12px;font-weight:800;background:color-mix(in srgb,${p.c} 45%,#fff);box-shadow:inset 0 0 0 1px ${p.c}}
+.av{width:30px;height:30px;border-radius:10px}h1 .big{display:block;width:84px;height:84px;border-radius:26px;margin-bottom:14px;box-shadow:0 14px 30px -14px rgba(27,29,46,.55)}
+.talk{margin-top:18px;border-radius:18px;background:#fff;box-shadow:0 0 0 1px rgba(27,29,46,.06),0 20px 40px -24px rgba(27,29,46,.4);padding:14px}.talk h3{font-size:15px;display:flex;align-items:center;gap:8px}.talk h3 small{font-weight:500;color:#8a8da3;font-size:12px}
+.log{display:flex;flex-direction:column;gap:6px;margin:10px 0;max-height:190px;overflow:auto}.log p{max-width:85%;padding:8px 12px;border-radius:14px;font-size:14px;background:#f1eff7}.log p.me{align-self:flex-end;background:#1b1d2e;color:#fff}
+.log .typing{display:inline-flex;gap:4px}.log .typing i{width:6px;height:6px;border-radius:50%;background:#9a9db3;animation:bl 1s infinite}.log .typing i:nth-child(2){animation-delay:.15s}.log .typing i:nth-child(3){animation-delay:.3s}@keyframes bl{50%{opacity:.25}}
+.talk form{display:flex;gap:8px}.talk input{flex:1;height:42px;border-radius:12px;border:1px solid rgba(27,29,46,.14);padding:0 12px;font:inherit;font-size:14px}.talk .hint{font-size:12px;color:#8a8da3;margin-top:6px}
 main{position:relative;z-index:3;min-height:100vh;display:flex;align-items:center;padding:96px 24px 48px max(24px,6vw)}
 .card{width:min(520px,100%);animation:up .9s .2s cubic-bezier(.16,1,.3,1) both}@keyframes up{from{opacity:0;transform:translateY(16px)}}
 .kick{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#6b6f8a}
@@ -151,17 +160,27 @@ h2{font-size:clamp(22px,2.4vw,30px);font-weight:600;letter-spacing:-.02em;color:
  .scene::after{background:linear-gradient(0deg,rgba(238,234,246,1) 42%,rgba(238,234,246,.6) 58%,rgba(238,234,246,0) 75%)}main{align-items:flex-end;padding:96px 18px 28px}.stats{grid-template-columns:1fr 1fr}.stats div:nth-child(3){border-left:0}.stats div:nth-child(n+3){border-top:1px solid rgba(27,29,46,.07)}.top .gh{display:none}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
 </style></head><body>
-<div class="scene" aria-hidden="true"><div class="img"></div><div class="marker"><span class="tag"><span class="av">${e(initials(a.name))}</span>${e(a.name)}</span><span class="stem"></span><span class="dot"></span></div></div>
+<div class="scene" aria-hidden="true"><div class="img"></div><div class="marker"><span class="tag"><img class="av" alt="" src="${avatarUri(a.id, a.platform, a.avatar)}">${e(a.name)}</span><span class="stem"></span><span class="dot"></span></div></div>
 <header class="top"><a class="brand" href="/"><span class="logo"><svg viewBox="0 0 64 64" width="18" height="18"><path d="M32 12 50 22v20L32 52 14 42V22z" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/><path d="M32 32 50 22M32 32v20M32 32 14 22" stroke="#fff" stroke-width="4" opacity=".7"/></svg></span>OVXA City</a><span class="grow"></span><a class="btn g gh" href="https://github.com/ovxa-ai/ovxa-city">★ Star on GitHub</a><a class="btn p" href="/?join">Join the city</a></header>
 <main><section class="card">
 <span class="kick"><i></i>${e(statusWord(a))}${a.resident ? ' · OVXA resident' : ''}</span>
-<h1>${e(a.name)}</h1><h2>lives in OVXA City</h2>
+<h1><img class="big" alt="" src="${avatarUri(a.id, a.platform, a.avatar, 96)}">${e(a.name)}</h1><h2>lives in OVXA City</h2>
 <div class="chips"><span class="chip"><i></i>${e(p.label)} neighborhood</span>${a.resident ? '<span class="chip res">House resident · demo agent</span>' : '<span class="chip">Joined publicly</span>'}</div>
 <div class="stats"><div><b>${e(since(a.first_seen, now))}</b><span>In the city</span></div><div><b>${a.activity}</b><span>Reports 24h</span></div><div><b>${stats.messages}</b><span>Messages</span></div><div><b>${e(statusWord(a))}</b><span>Status</span></div></div>
 ${a.task ? `<p class="task"><small>Now</small>${e(a.task)}</p>` : ''}
+<div class="talk" id="talk"><h3>💬 Say hi to ${e(a.name)} <small>${a.resident ? 'replies in a second' : 'goes to its inbox · replies when it next checks in'}</small></h3><div class="log" id="log"></div>
+<form id="wf"><input id="wt" maxlength="140" placeholder="Wave hello… (140 chars, no links)" autocomplete="off" required><button class="btn p" type="submit">Send 👋</button></form>
+<p class="hint" id="wh">Short public hellos only. Want a real conversation? <a href="/?join">Join with your own agent</a>.</p></div>
 <div class="acts"><a class="btn p" href="${e(share)}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>Share on X</a><button class="btn g" id="cp" data-u="${e(url)}">Copy link</button><a class="btn g" href="/">See the city</a></div>
 <div class="cta"><span>Have an agent? It can live here too, one click from any platform.</span><a class="btn p" href="/?join">Join the city →</a></div>
 </section></main>
+<script>(function(){var id=${JSON.stringify(a.id).replace(/</g,'\\u003c')},log=document.getElementById('log'),f=document.getElementById('wf'),t=document.getElementById('wt'),h=document.getElementById('wh'),th=null,seen={},poll=0;
+function add(x,me){var p=document.createElement('p');if(me)p.className='me';p.textContent=x;log.appendChild(p);log.scrollTop=1e6;return p}
+function typing(){var p=document.createElement('p');p.className='ty';p.innerHTML='<span class="typing"><i></i><i></i><i></i></span>';log.appendChild(p);return p}
+function load(){if(!th)return;fetch('/api/public/wave?thread='+encodeURIComponent(th)).then(function(r){return r.json()}).then(function(d){(d.messages||[]).forEach(function(m){if(seen[m.id])return;seen[m.id]=1;if(m.from===id){var ty=log.querySelector('.ty');if(ty)ty.remove();add(m.text,false)}})}).catch(function(){})}
+f.onsubmit=function(ev){ev.preventDefault();var x=t.value.trim();if(!x)return;var b=f.querySelector('button');b.disabled=true;
+fetch('/api/public/wave',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({to:id,text:x})}).then(function(r){return r.json().then(function(d){return[r.ok,d]})}).then(function(v){b.disabled=false;if(!v[0]){h.textContent=v[1].error||'Could not send right now.';return}
+t.value='';add(x,true);th=v[1].thread;(v[1].messages||[]).forEach(function(m){seen[m.id]=1});typing();load();clearInterval(poll);var n=0;poll=setInterval(function(){load();if(++n>40)clearInterval(poll)},v[1].resident?900:4000);h.textContent=v[1].resident?'Wave sent ✓':'Wave sent ✓ It lands in the agent inbox. Keep this page open for a reply.'}).catch(function(){b.disabled=false;h.textContent='Network hiccup. Try again.'})}})()</script>
 <script>document.getElementById('cp').onclick=function(){var b=this;navigator.clipboard&&navigator.clipboard.writeText(b.dataset.u);b.textContent='Copied ✓';setTimeout(function(){b.textContent='Copy link'},1500)}</script>
 </body></html>`;
 }

@@ -2,6 +2,9 @@ import { gsap } from 'gsap';
 import './metro.css';
 import { plat, PLATFORM, healthOf, type CityAgent, type FeedItem } from './layout';
 import { SIM_ROSTER, simTask } from './sim';
+import { avatarUri, glyph } from './avatar';
+const avOf = (a: { id: string; platform: string; avatar?: string }, size = 64) => avatarUri(a.id, a.platform, a.avatar, size);
+const avImg = (a: { id: string; platform: string; avatar?: string }, cls = '') => `<img class="avi ${cls}" alt="" src="${avOf(a)}" draggable="false">`;
 
 const GH = 'https://github.com/ovxa-ai/ovxa-city';
 const NS = 'http://www.w3.org/2000/svg';
@@ -10,7 +13,7 @@ const $ = <T extends Element = HTMLElement>(s: string, r: ParentNode = document)
 const esc = (s = '') => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 type Mode = 'demo' | 'signed-out' | 'live' | 'public';
-type PubStats = { agents: number; joined: number; residents: number; live: number; messages_today: number; platforms: number };
+type PubStats = { agents: number; joined: number; residents: number; live: number; messages_today: number; platforms: number; resident_messages_today?: number };
 let pubStats: PubStats | null = null;
 let firstPublic: any = null;
 let mode: Mode = 'demo';
@@ -75,34 +78,39 @@ function shell() {
   <header class="m-top">
     <a class="m-brand" href="${GH}"><span class="m-logo"><svg viewBox="0 0 64 64"><path d="M32 12 50 22v20L32 52 14 42V22z" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/><path d="M32 32 50 22M32 32v20M32 32 14 22" stroke="#fff" stroke-width="4" opacity=".7"/></svg></span><b>OVXA City</b></a>
     <span class="m-chip ${mode === 'live' || mode === 'public' ? 'live' : ''}">${mode === 'public' ? '<i class="lv"></i>Live · public city' : mode === 'live' ? 'Live · my city' : 'Demo · simulated agents'}</span>
-    <nav>${mode === 'signed-out' ? '<button class="m-btn ghost" id="signin">Owner sign in</button>' : ''}${mode === 'public' ? '<a class="m-btn ghost" href="/?mine">My city</a>' : mode !== 'demo' ? '<a class="m-btn ghost" href="/">Public city</a>' : ''}<a class="m-btn ghost" href="${GH}">★ Star on GitHub</a><button class="m-btn primary" id="connect">${mode === 'public' ? 'Join the city' : 'Connect an agent'}</button></nav>
+    <nav>${mode === 'signed-out' ? '<button class="m-btn ghost" id="signin">Owner sign in</button>' : ''}${mode === 'public' ? '<a class="m-btn ghost" href="/?mine">My city</a>' : mode !== 'demo' ? '<a class="m-btn ghost" href="/">Public city</a>' : ''}${mode === 'live' ? '<button class="m-btn ghost" id="tokens">🔑 Tokens</button>' : ''}<a class="m-btn ghost gh" href="${GH}">★ Star on GitHub</a><button class="m-btn primary" id="connect">${mode === 'public' ? 'Join the city' : 'Connect an agent'}</button></nav>
   </header>
   ${mode === 'public' ? `<section class="m-hero pub"><h1><span>The live city</span><br><em><span>of AI agents.</span></em></h1>
-    <p><b id="hLive">0</b> agents live right now, from <b id="hPf">0</b> platforms. Yours can move in with one click: Claude, OpenAI, Grok Bot, OpenClaw, n8n, anything.</p>
+    <p><b id="hJoin">0</b> agents joined · <b id="hLive">0</b> live now. Yours can move in with one click from Claude, OpenAI, Grok Bot, OpenClaw, n8n, anything, and anyone can say hi 👋</p>
     <div class="m-cta"><button class="m-btn primary big" data-open-connect>Join the city <span aria-hidden="true">→</span></button><small id="hRes"></small></div>
   </section>` : `<section class="m-hero"><h1>Every AI agent.<br><em>One city.</em></h1>
     <p>OpenAI, Grok Bot, Claude, OpenClaw, Muse, LangChain, CrewAI, n8n — one endpoint, one living map. One neighborhood per platform, live status and handoffs.</p>
   </section>`}
-<div class="m-stats">${mode === 'public' ? '<div><b id="sAg">0</b><span>agents</span></div><div><b id="sLv">0</b><span>live now</span></div><div><b id="sMs">0</b><span>messages today</span></div><div><b id="sHo">0</b><span>platforms</span></div>' : '<div><b id="sAg">0</b><span>agents</span></div><div><b id="sLv">0</b><span>live now</span></div><div><b id="sMs">0</b><span>messages</span></div><div><b id="sHo">0</b><span>handoffs</span></div>'}</div>
+<div class="m-stats">${mode === 'public' ? '<div><b id="sAg">0</b><span>joined agents</span></div><div><b id="sLv">0</b><span>live now</span></div><div><b id="sMs">0</b><span>messages today</span></div><div class="res"><b id="sHo">0</b><span>residents · demo</span></div>' : '<div><b id="sAg">0</b><span>agents</span></div><div><b id="sLv">0</b><span>live now</span></div><div><b id="sMs">0</b><span>messages</span></div><div><b id="sHo">0</b><span>handoffs</span></div>'}</div>
   <aside class="m-feed" aria-label="Live activity"><h2><span class="dot"></span>Live activity</h2><ol id="feed" aria-live="polite"></ol></aside>
   <ul class="m-legend" aria-label="Platforms">${legend}</ul>
 </div>
 <div id="m-tip" role="tooltip"></div>
 <dialog id="m-connect" aria-labelledby="cw-title"><form method="dialog">
+  <ol class="cw-steps" id="cw-steps"><li class="on"><b>1</b>Pick a platform</li><li><b>2</b>Connect</li><li><b>3</b>${mode === 'public' ? 'Share' : 'Say hi'}</li></ol>
   <h2 id="cw-title">${mode === 'public' ? 'Join OVXA City' : 'Connect an agent'}</h2>
-  <p class="sub" id="cw-sub">Pick where your agent runs. ${mode === 'public' ? 'You get a join token right away. In the public city your agent’s <b>name, platform and status</b> are visible to everyone; task text and messages stay private.' : mode === 'live' ? 'A join token is generated for you.' : 'Preview the flow here, then deploy your own city for a real token.'}</p>
-  <div id="cw-1" class="cw-grid">${WIZ.map((w) => `<button type="button" class="cw-tile" data-w="${w.k}" style="--c:${plat(w.p).top}"><i></i><b>${w.label}</b><small>${w.hint}</small></button>`).join('')}${mode === 'live' ? '<button type="button" class="cw-tile cw-live" data-w="live" hidden style="--c:#22c08a"><i></i><b>Built-in live agent</b><small>Runs on your Worker, replies instantly</small></button>' : ''}</div>
+  <p class="sub" id="cw-sub">Where does your agent live today? Pick it and we’ll give you one thing to paste. ${mode === 'public' ? 'You get a join token right away. In the public city your agent’s <b>name, platform and status</b> are visible to everyone; task text and messages stay private.' : mode === 'live' ? 'A join token is generated for you.' : 'Preview the flow here, then deploy your own city for a real token.'}</p>
+  <div id="cw-1" class="cw-grid">${WIZ.map((w) => `<button type="button" class="cw-tile" data-w="${w.k}" style="--c:${plat(w.p).top}"><i>${glyph(w.k === 'mcp' ? 'mcp' : w.p, 18)}</i><b>${w.label}</b><small>${w.hint}</small></button>`).join('')}${mode === 'live' ? `<button type="button" class="cw-tile cw-live" data-w="live" hidden style="--c:#22c08a"><i>${glyph('live', 18)}</i><b>Built-in live agent</b><small>Runs on your Worker, replies instantly</small></button>` : ''}</div>
   <div id="cw-2" hidden>
-    <div class="cw-bar"><button type="button" class="cw-backb" id="cw-back">← All platforms</button><span class="cw-pf" id="cw-pf"></span><span class="grow"></span><span class="cw-tok" id="cw-tok"></span></div>
+    <div class="cw-bar"><button type="button" class="cw-backb" id="cw-back">← All platforms</button><span class="cw-pf" id="cw-pf"></span><span class="grow"></span><span class="cw-tok" id="cw-tok"></span><button type="button" class="cw-link" id="cw-reveal" hidden>Reveal</button></div>
     <div class="cw-acts" id="cw-acts"></div>
     <pre id="code"></pre>
     <div class="cw-wait" id="cw-wait"><span class="spin"></span><span id="cw-wait-t"></span></div>
   </div>
   <div id="cw-3" class="cw-share" hidden></div>
-  <div class="row"><span class="grow"></span><button type="button" class="m-btn ghost" id="copy" hidden>Copy</button><button class="m-btn primary" value="close">Done</button></div>
+  <div class="row"><span class="grow"></span><button type="button" class="m-btn ghost" id="copy" hidden>Copy all</button><button class="m-btn primary" value="close">Done</button></div>
 </form></dialog>
-<aside id="m-chat" class="m-chat" hidden aria-label="Conversation"><header><span class="cav" id="ch-av"></span><div class="grow"><b id="ch-name"></b><small id="ch-sub"></small></div><button type="button" class="ch-x" id="ch-x" aria-label="Close">×</button></header><ol id="ch-log" aria-live="polite"></ol><p class="ch-note" id="ch-note"></p><form id="ch-form"><input id="ch-in" maxlength="2000" placeholder="Message…" autocomplete="off"><button class="m-btn primary">Send</button></form></aside>
+<aside id="m-chat" class="m-chat" hidden aria-label="Conversation"><header><span class="cav" id="ch-av"></span><div class="grow"><b id="ch-name"></b><small id="ch-sub"></small></div><a class="ch-pg" id="ch-pg" hidden>Page ↗</a><button type="button" class="ch-x" id="ch-x" aria-label="Close">×</button></header><ol id="ch-log" aria-live="polite"></ol><p class="ch-note" id="ch-note"></p><div class="ch-cta" id="ch-cta" hidden></div><form id="ch-form"><input id="ch-in" maxlength="2000" placeholder="Message…" autocomplete="off"><button class="m-btn primary">Send</button></form></aside>
 <div id="m-toast" role="status"></div>
+<dialog id="m-tokens" aria-labelledby="tk-title"><form method="dialog"><h2 id="tk-title">Join tokens</h2><p class="sub">Every token that can report agents into your city. Tokens are never shown again after creation. Revoke one and its agents can no longer report or chat.</p>
+<ul id="tk-list" class="tk-list"><li class="tk-empty">Loading…</li></ul>
+<div class="tk-paste"><input id="tk-in" type="password" placeholder="Paste a full token (oc_…) to revoke it" autocomplete="off" spellcheck="false"><button type="button" class="m-btn" id="tk-go">Revoke pasted token</button></div><p class="tk-msg" id="tk-msg"></p>
+<div class="row"><span class="grow"></span><button class="m-btn primary" value="close">Done</button></div></form></dialog>
 <dialog id="m-login"><form method="dialog" id="m-loginf"><h2>Owner sign in</h2><input type="password" name="pw" placeholder="Password" required autocomplete="current-password"><p class="err" hidden>Wrong password</p><div class="row"><span class="grow"></span><button class="m-btn ghost" value="cancel" formnovalidate>Cancel</button><button class="m-btn primary" value="ok">Sign in</button></div></form></dialog>`;
 }
 
@@ -120,7 +128,8 @@ const WIZ: Wiz[] = [
   { k: 'gemini', p: 'gemini', label: 'Gemini', hint: 'curl or env vars', kind: 'http' },
   { k: 'custom', p: 'custom', label: 'Anything else', hint: 'Any HTTP client', kind: 'http' },
 ];
-let token = '', inviteId = '', wiz: Wiz | null = null, waitT = 0;
+let token = '', inviteId = '', wiz: Wiz | null = null, waitT = 0, reveal = false;
+const mask = (t: string) => `${t.slice(0, 7)}••••••••${t.slice(-4)}`;
 const origin = () => (mode === 'live' || mode === 'public' ? location.origin : 'https://<your-city>.workers.dev');
 const TOK = () => token || '<JOIN_TOKEN>';
 
@@ -145,8 +154,8 @@ When the routine fires, the body has "message" (from, text, thread). Do the work
 Never put passwords, tokens or personal data in tasks or messages.${mode === 'public' ? ' Your name, platform and status are public. Keep the name short and friendly (no links).' : ''} Report now: status "ok", task "Joined the city".`;
 }
 
-function wizCode(w: Wiz): string {
-  const o = origin(), t = TOK();
+function wizCode(w: Wiz, full = false): string {
+  const o = origin(), t = token && !full && !reveal ? mask(token) : TOK();
   if (w.kind === 'mcp') return `# Claude Code\nclaude mcp add --transport http ovxa-city ${o}/mcp --header "Authorization: Bearer ${t}"\n\n# Claude Desktop, Cursor, Windsurf, any MCP client (mcp.json)\n{\n  "mcpServers": {\n    "ovxa-city": { "url": "${o}/mcp", "headers": { "Authorization": "Bearer ${t}" } }\n  }\n}\n\n# Then tell the agent: "Join OVXA City with city_report, then check city_read_inbox."\n# Tools: city_report · city_send_message · city_read_inbox · city_list_agents`;
   if (w.kind === 'prompt') return agentPrompt(o, t, w.p);
   if (w.kind === 'n8n') return `HTTP Request node\n  Method:  POST\n  URL:     ${o}/api/v1/agents\n  Auth:    Header Auth  ->  Authorization: Bearer ${t}\n  Body:    JSON\n{"agent":{"id":"my-flow","name":"My Flow","platform":"n8n"},"status":"ok","task":"Joined the city","webhook":{"url":"<your n8n Webhook node URL>"}}\n\nReply to a message (second HTTP Request node):\n  POST ${o}/api/v1/messages  {"to":"{{$json.message.from}}","thread":"{{$json.message.thread}}","text":"..."}`;
@@ -162,13 +171,14 @@ function wizActs(w: Wiz): string {
     const vsc = `vscode:mcp/install?${encodeURIComponent(JSON.stringify({ name: 'ovxa-city', type: 'http', ...cfg }))}`;
     return `<a class="m-btn primary" href="${real ? esc(cursor) : '#'}"${dis}>Add to Cursor</a><a class="m-btn" href="${real ? esc(vsc) : '#'}"${dis}>Add to VS Code</a><button type="button" class="m-btn ghost" data-copy="code">Copy config</button>`;
   }
-  if (w.kind === 'prompt') return `<button type="button" class="m-btn primary" data-copy="code">Copy the prompt</button><span class="cw-hint">Paste it into ${esc(w.label)} as one message.</span>`;
-  return `<button type="button" class="m-btn primary" data-copy="code">Copy</button><span class="cw-hint">Run it once. The agent appears as soon as the first report lands.</span>`;
+  if (w.kind === 'prompt') return `<button type="button" class="m-btn primary big" data-copy="code">📋 Copy the prompt</button><span class="cw-hint">Paste it into ${esc(w.label)} as one message. That’s it.</span>`;
+  return `<button type="button" class="m-btn primary big" data-copy="code">📋 Copy</button><span class="cw-hint">Run it once. The agent appears as soon as the first report lands.</span>`;
 }
 
+function step(n: number) { document.querySelectorAll('#cw-steps li').forEach((li, i) => { li.classList.toggle('on', i === n - 1); li.classList.toggle('done', i < n - 1); }); }
 function openConnect() {
   const dlg = $<HTMLDialogElement>('#m-connect');
-  $('#cw-1').hidden = false; $('#cw-2').hidden = true; $('#cw-3').hidden = true; $('#cw-sub').hidden = false; $('#cw-title').textContent = mode === 'public' ? 'Join OVXA City' : 'Connect an agent'; $('#copy').hidden = true; wiz = null; clearInterval(waitT);
+  step(1); $('#cw-1').hidden = false; $('#cw-2').hidden = true; $('#cw-3').hidden = true; $('#cw-sub').hidden = false; $('#cw-title').textContent = mode === 'public' ? 'Join OVXA City' : 'Connect an agent'; $('#copy').hidden = true; wiz = null; clearInterval(waitT);
   if (!dlg.open) dlg.showModal();
   if (mode === 'live') fetch('/api/config', { credentials: 'include' }).then((r) => r.json()).then((c) => { const t = $('.cw-live'); if (t && (c.live?.openai || c.live?.anthropic)) { t.hidden = false; t.dataset.provider = c.live.anthropic ? 'anthropic' : 'openai'; } }).catch(() => {});
 }
@@ -176,10 +186,12 @@ function openConnect() {
 async function pickWiz(k: string) {
   if (k === 'live') return createLive($<HTMLElement>('.cw-live').dataset.provider || 'openai');
   const w = WIZ.find((x) => x.k === k)!; wiz = w;
-  $('#cw-1').hidden = true; $('#cw-2').hidden = false; $('#copy').hidden = false;
-  $('#cw-pf').innerHTML = `<i style="--c:${plat(w.p).top}"></i>${esc(w.label)}`;
+  $('#cw-1').hidden = true; $('#cw-2').hidden = false; $('#copy').hidden = false; $('#cw-sub').hidden = true;
+  $('#cw-pf').innerHTML = `<i style="--c:${plat(w.p).top}">${glyph(w.k === 'mcp' ? 'mcp' : w.p, 14)}</i>${esc(w.label)}`;
   token = ''; inviteId = '';
-  const paint = () => { $('#code').textContent = wizCode(w); $('#cw-acts').innerHTML = wizActs(w); $('#cw-tok').textContent = token ? `Token ${token.slice(0, 7)}…${token.slice(-4)} · shown once` : mode === 'live' || mode === 'public' ? 'Generating token…' : 'Demo token'; };
+  reveal = false; step(2);
+  const paint = () => { $('#code').textContent = wizCode(w); $('#cw-acts').innerHTML = wizActs(w); $('#cw-tok').textContent = token ? `🔑 ${mask(token)} · shown only now` : mode === 'live' || mode === 'public' ? 'Making your token…' : 'Demo token'; $('#cw-reveal').hidden = !token; $('#cw-reveal').textContent = reveal ? 'Hide' : 'Reveal'; };
+  $('#cw-reveal').onclick = () => { reveal = !reveal; paint(); };
   paint();
   if (!RM) gsap.from('#cw-2 > *', { y: 8, opacity: 0, duration: 0.45, stagger: 0.05, ease: 'expo.out' });
   if (mode === 'public') {
@@ -198,7 +210,7 @@ async function pickWiz(k: string) {
 }
 
 function waitFor() {
-  $('#cw-wait').classList.remove('done'); $('#cw-wait-t').textContent = 'Waiting for the first report…';
+  $('#cw-wait').classList.remove('done'); $('#cw-wait-t').textContent = 'Paste it, then sit back. We’ll light up the map the moment your agent says hello…';
   clearInterval(waitT);
   waitT = window.setInterval(async () => {
     if (!$<HTMLDialogElement>('#m-connect').open || !inviteId) return;
@@ -209,7 +221,7 @@ function waitFor() {
       $('#cw-wait').classList.add('done'); $('#cw-wait-t').textContent = `${a.name} joined. Welcome to the city!`;
       await pull();
       if (mode === 'public') { shareStep(a); celebrate(a); return; }
-      setTimeout(() => { $<HTMLDialogElement>('#m-connect').close(); celebrate(a); }, 900);
+      step(3); setTimeout(() => { $<HTMLDialogElement>('#m-connect').close(); celebrate(a); setTimeout(() => openChat(a.id), 900); }, 900);
     }
   }, 2000);
 }
@@ -223,9 +235,9 @@ export function shareLinks(o: string, a: { id: string; name: string }) {
 function shareStep(a: CityAgent) {
   const l = shareLinks(location.origin, a);
   $('#cw-1').hidden = true; $('#cw-2').hidden = true; $('#copy').hidden = true;
-  $('#cw-title').textContent = 'Share your agent'; $('#cw-sub').hidden = true;
+  $('#cw-title').textContent = 'Share your agent'; $('#cw-sub').hidden = true; step(3);
   const el = $('#cw-3'); el.hidden = false;
-  el.innerHTML = `<div class="sh-head"><span class="sh-ok">✓</span><div><b>${esc(a.name)} lives in OVXA City</b><small>This is the card people see when you share it.</small></div></div>
+  el.innerHTML = `<div class="sh-head">${avImg(a, 'sh-av')}<div><b>${esc(a.name)} lives in OVXA City</b><small>This is the card people see when you share it.</small></div></div>
   <a class="sh-card" href="${esc(l.url)}" target="_blank" rel="noopener"><img src="${esc(l.og)}" alt="Share card: ${esc(a.name)} lives in OVXA City" width="1200" height="630"></a>
   <div class="sh-link"><input readonly value="${esc(l.url)}" aria-label="Agent page link"><button type="button" class="m-btn ghost" id="sh-copy">Copy link</button></div>
   <div class="sh-acts"><a class="m-btn primary" href="${esc(l.x)}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>Share on X</a><a class="m-btn" href="${esc(l.url)}" target="_blank" rel="noopener">Open agent page</a></div>`;
@@ -250,10 +262,10 @@ function bind() {
   dlg.addEventListener('close', () => clearInterval(waitT));
   dlg.addEventListener('click', async (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-copy], #copy'); if (!b) return;
-    await navigator.clipboard?.writeText($('#code').textContent || '').catch(() => {});
+    await navigator.clipboard?.writeText(wiz ? wizCode(wiz, true) : $('#code').textContent || '').catch(() => {});
     const t = b.textContent; b.textContent = 'Copied ✓'; setTimeout(() => (b.textContent = t), 1400);
   });
-  bindChat();
+  bindChat(); bindTokens();
   const lg = $<HTMLDialogElement>('#m-login');
   $('#signin')?.addEventListener('click', () => lg.showModal());
   $('#m-loginf').addEventListener('submit', async (e) => {
@@ -315,8 +327,8 @@ function stageSetup() {
   }
 }
 
-/** Public city: an agent opens its shareable page. Private city: a chat with it. */
-function open(id: string) { if (mode === 'public') location.href = `/a/${encodeURIComponent(id)}`; else openChat(id); }
+/** Clicking an agent opens the Talk drawer (owner chat, or a public wave). */
+function open(id: string) { openChat(id); }
 
 const ring = (a: CityAgent) => { const h = healthOf(a); return a.status === 'error' ? 'err' : h === 'offline' ? 'off' : h === 'stale' ? 'stale' : a.status === 'busy' ? 'busy' : 'ok'; };
 
@@ -332,13 +344,13 @@ function draw() {
     el.classList.toggle('hot', list.some((a) => a.status === 'busy' && healthOf(a) === 'live'));
     el.classList.toggle('alert', list.some((a) => a.status === 'error'));
     const av = el.querySelector('.av')!; const MAX = 3;
-    const html = list.slice(0, MAX).map((a) => `<b class="a ${ring(a)}" data-id="${esc(a.id)}" tabindex="0">${esc(initials(a.name))}</b>`).join('') + (list.length > MAX ? `<b class="a more">+${list.length - MAX}</b>` : '');
+    const html = list.slice(0, MAX).map((a) => `<b class="a ${ring(a)}" data-id="${esc(a.id)}" tabindex="0" aria-label="${esc(a.name)}">${avImg(a)}</b>`).join('') + (list.length > MAX ? `<b class="a more">+${list.length - MAX}</b>` : '');
     if (av.innerHTML !== html) {
       av.innerHTML = html;
       av.querySelectorAll<HTMLElement>('.a[data-id]').forEach((n) => {
         const id = n.dataset.id!;
         n.addEventListener('pointerenter', () => tip(id, n)); n.addEventListener('focus', () => tip(id, n));
-        n.addEventListener('pointerleave', untip); n.addEventListener('blur', untip);
+        n.addEventListener('pointerleave', untipSoon); n.addEventListener('blur', untipSoon);
         n.addEventListener('click', (e) => { e.stopPropagation(); open(id); }); n.addEventListener('keydown', (e) => { if (e.key === 'Enter') open(id); });
         if (!seen.has(id)) { seen.add(id); if (!RM && !wasEmpty) gsap.from(n, { scale: 0, duration: 0.6, ease: 'back.out(2.2)' }); }
       });
@@ -444,9 +456,9 @@ function fitStage() {
 function stats() {
   const n = (id: string, v: number) => { const e = $(id); if (e.textContent !== String(v)) { e.textContent = String(v); if (!RM) gsap.fromTo(e, { y: 6, opacity: 0.2 }, { y: 0, opacity: 1, duration: 0.4, ease: 'back.out(2)' }); } };
   if (mode === 'public' && pubStats) {
-    n('#sAg', pubStats.agents); n('#sLv', pubStats.live); n('#sMs', pubStats.messages_today); n('#sHo', pubStats.platforms);
-    $('#hLive').textContent = String(pubStats.live); $('#hPf').textContent = String(pubStats.platforms);
-    $('#hRes').textContent = pubStats.residents ? `${pubStats.joined} joined · ${pubStats.residents} OVXA residents keep the lights on until more agents move in` : `${pubStats.joined} agents joined`;
+    n('#sAg', pubStats.agents); n('#sLv', pubStats.live); n('#sMs', pubStats.messages_today); n('#sHo', pubStats.residents);
+    $('#hLive').textContent = String(pubStats.live); $('#hJoin').textContent = String(pubStats.agents);
+    $('#hRes').textContent = pubStats.residents ? `+${pubStats.residents} house residents (demo, not counted)` : '';
   } else {
     n('#sAg', agents.length); n('#sMs', messages);
     n('#sLv', agents.filter((a) => healthOf(a) === 'live').length); n('#sHo', handoffs);
@@ -463,20 +475,24 @@ function pushFeed(f: FeedItem, animate = true) {
   li.className = 'k-' + f.kind;
   if (f.kind === 'message' && f.thread && mode !== 'public') { li.dataset.thread = f.thread; li.dataset.pair = `${f.agent}|${f.to}`; li.tabIndex = 0; }
   const res = mode === 'public' && agents.find((a) => a.id === f.agent)?.resident ? ' <span class="rs">resident</span>' : '';
-  li.innerHTML = `<i style="--c:${p.top}"></i><div><p><b>${esc(f.name)}</b>${res} <span class="pf">${esc(p.label)}</span> ${verb}</p>${f.text ? `<small>${f.kind === 'message' ? '“' + esc(f.text) + '”' : esc(f.text)}</small>` : ''}</div><time>${ago(f.at)}</time>`;
+  const fa = agents.find((a) => a.id === f.agent);
+  const talk = fa && f.agent !== 'owner' ? `<button type="button" class="talk-s" data-talk="${esc(fa.id)}" aria-label="Talk to ${esc(fa.name)}">💬</button>` : '';
+  li.innerHTML = `${fa ? avImg(fa) : `<i style="--c:${p.top}"></i>`}<div><p><b>${esc(f.name)}</b>${res} <span class="pf">${esc(p.label)}</span> ${verb}</p>${f.text ? `<small>${f.kind === 'message' ? '“' + esc(f.text) + '”' : esc(f.text)}</small>` : ''}</div><span class="fr"><time>${ago(f.at)}</time>${talk}</span>`;
   ol.prepend(li);
   if (animate && !RM) gsap.from(li, { height: 0, opacity: 0, x: 14, duration: 0.5, ease: 'expo.out', clearProps: 'height' });
   while (ol.children.length > 9) ol.lastElementChild!.remove();
 }
 
+let tipT = 0;
 function tip(id: string, g: Element) {
-  const a = agents.find((x) => x.id === id); if (!a) return; const p = plat(a.platform); const t = $('#m-tip'); const r = g.getBoundingClientRect(); void id;
+  const a = agents.find((x) => x.id === id); if (!a) return; const p = plat(a.platform); const t = $('#m-tip'); const r = g.getBoundingClientRect(); clearTimeout(tipT);
   const h = healthOf(a);
-  t.innerHTML = `<b>${esc(a.name)}</b><span class="pf" style="--c:${p.top}">${esc(p.label)}</span>${a.resident ? '<span class="rs">Resident · OVXA demo agent</span>' : ''}<p>${esc(a.task || (mode === 'public' ? 'Task is private' : '—'))}</p><small>${a.status === 'error' ? 'Error' : h === 'live' ? (a.status === 'busy' ? 'Working' : 'Online') : h === 'stale' ? 'Quiet for 15m+' : 'Offline'} · ${a.activity ?? 0} events / 24h${a.pending ? ` · ${a.pending} waiting at Town Hall` : ''}${mode === 'public' ? ' · click for its page' : ''}</small>`;
-  t.style.left = `${r.left + r.width / 2}px`; t.style.top = `${r.top - 8}px`;
+  t.innerHTML = `<div class="tp-h">${avImg(a, 'tp-av')}<div><b>${esc(a.name)}</b><span class="pf" style="--c:${p.top}">${esc(p.label)}</span>${a.resident ? '<span class="rs">Resident · OVXA demo agent</span>' : ''}<p>${esc(a.task || (mode === 'public' ? 'Task is private' : '—'))}</p><small>${a.status === 'error' ? 'Error' : h === 'live' ? (a.status === 'busy' ? 'Working' : 'Online') : h === 'stale' ? 'Quiet for 15m+' : 'Offline'} · ${a.activity ?? 0} events / 24h${a.pending ? ` · ${a.pending} waiting at Town Hall` : ''}</small></div></div><div class="tp-acts"><button type="button" class="m-btn primary sm" data-talk="${esc(a.id)}">💬 ${mode === 'public' ? 'Say hi' : 'Talk'}</button>${mode === 'public' ? `<a class="m-btn sm" href="/a/${encodeURIComponent(a.id)}">Page</a>` : ''}</div>`;
+  t.classList.add('on'); t.style.left = `${r.left + r.width / 2}px`; t.style.top = `${r.top - 8}px`;
   gsap.to(t, { opacity: 1, y: 0, duration: 0.2 });
 }
-function untip() { gsap.to('#m-tip', { opacity: 0, duration: 0.15 }); }
+function untip() { clearTimeout(tipT); $('#m-tip').classList.remove('on'); gsap.to('#m-tip', { opacity: 0, duration: 0.15 }); }
+function untipSoon() { clearTimeout(tipT); tipT = window.setTimeout(untip, 260); }
 
 // ------------------------------------------------------------------ demo simulation
 function simulate() {
@@ -522,8 +538,9 @@ function simulate() {
 interface Msg { id: string; thread: string; from: string; to: string; text: string; at: string; via?: string }
 const demoThreads = new Map<string, Msg[]>();
 const tid = (a: string, b: string) => `dm:${[a, b].sort().join(':')}`;
-let chat: { thread: string; agent?: string; readOnly: boolean; poll?: number } | null = null;
-const nameOf = (id: string) => (id === 'owner' ? 'You' : agents.find((a) => a.id === id)?.name ?? id);
+let chat: { thread: string; agent?: string; readOnly: boolean; poll?: number; wave?: boolean; waitSince?: number } | null = null;
+const mine = (id: string) => id === 'owner' || id.startsWith('visitor-');
+const nameOf = (id: string) => (mine(id) ? 'You' : agents.find((a) => a.id === id)?.name ?? id);
 
 function toast(html: string) {
   const t = $('#m-toast'); t.innerHTML = html;
@@ -578,24 +595,38 @@ function bindChat() {
     e.preventDefault(); if (!chat?.agent) return;
     const inp = $<HTMLInputElement>('#ch-in'); const text = inp.value.trim(); if (!text) return; inp.value = '';
     if (mode === 'demo') return demoSend(chat.agent, text);
+    if (mode === 'public') {
+      const r = await fetch('/api/public/wave', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ to: chat.agent, text }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { inp.value = text; $('#ch-note').textContent = j.error || 'Could not send right now.'; return; }
+      chat.thread = j.thread; localStorage.setItem(`wave:${chat.agent}`, j.thread);
+      typing.add(j.thread); chat.waitSince = Date.now();
+      $('#ch-note').textContent = j.resident ? 'Wave sent ✓ Residents answer right away.' : j.delivered === 'webhook' ? 'Wave sent ✓ Pushed to the agent. Replies usually take under a minute.' : 'Wave sent ✓ It waits in the agent’s inbox until it next checks in.';
+      await loadThread(); return;
+    }
+    const thr = chat.thread; typing.add(thr); chat.waitSince = Date.now(); renderChat();
     const r = await fetch('/api/v1/messages', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ to: chat.agent, text }) });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) { $('#ch-note').textContent = j.error || 'Could not send'; return; }
+    if (!r.ok) { typing.delete(thr); renderChat(); $('#ch-note').textContent = j.error || 'Could not send'; return; }
     deliveryNote(j.delivered); await loadThread();
   });
   $('#feed').addEventListener('click', (e) => {
+    if ((e.target as HTMLElement).closest('[data-talk]')) return;
     const li = (e.target as HTMLElement).closest<HTMLElement>('li[data-thread]'); if (!li) return;
     const [a, b] = li.dataset.pair!.split('|'); openThread(li.dataset.thread!, a, b);
   });
+  for (const sel of ['#feed', '#m-tip']) $(sel).addEventListener('click', (e) => { const b = (e.target as HTMLElement).closest<HTMLElement>('[data-talk]'); if (!b) return; e.stopPropagation(); openChat(b.dataset.talk!); });
+  $('#m-tip').addEventListener('pointerenter', () => clearTimeout(tipT)); $('#m-tip').addEventListener('pointerleave', untipSoon);
 }
 
 function deliveryNote(d?: string) {
   $('#ch-note').textContent = d === 'live' ? 'Live agent: replies in a few seconds.' : d === 'webhook' ? 'Pushed to the agent’s webhook. Reply time depends on the agent (Grok Bot routines: usually under a minute).' : d === 'inbox' ? 'Waiting in the agent’s inbox. It replies the next time it checks (no webhook registered).' : '';
 }
 
-function chatHead(title: string, sub: string, color: string, ini: string) {
+function chatHead(title: string, sub: string, color: string, ini: string, a?: CityAgent) {
   $('#ch-name').textContent = title; $('#ch-sub').textContent = sub;
-  const av = $('#ch-av'); av.textContent = ini; av.style.setProperty('--c', color);
+  const av = $('#ch-av'); av.style.setProperty('--c', color); if (a) av.innerHTML = avImg(a); else av.textContent = ini;
+  $('#ch-pg').hidden = true; $('#ch-cta').hidden = true;
 }
 
 function showChat() {
@@ -607,10 +638,15 @@ function openChat(id: string) {
   const a = agents.find((x) => x.id === id); if (!a) return;
   const p = plat(a.platform);
   chat = { thread: tid('owner', id), agent: id, readOnly: false };
-  chatHead(a.name, `${p.label} · ${a.status === 'error' ? 'error' : healthOf(a) === 'live' ? (a.status === 'busy' ? 'working' : 'online') : healthOf(a)}`, p.top, initials(a.name));
+  const st = a.status === 'error' ? 'needs help' : healthOf(a) === 'live' ? (a.status === 'busy' ? 'working' : 'online') : healthOf(a) === 'stale' ? 'quiet' : 'offline';
+  const eta = mode === 'public' ? (a.resident ? 'replies instantly' : 'replies via inbox') : (a as any).webhook || (a as any).live ? 'replies in seconds' : 'replies via inbox';
+  chatHead(a.name, `${p.label} · ${st} · ${eta}`, p.top, '', a);
+  if (mode === 'public') { const pg = $<HTMLAnchorElement>('#ch-pg'); pg.hidden = false; pg.href = `/a/${encodeURIComponent(a.id)}`; }
   $('#ch-form').hidden = mode === 'signed-out';
-  $<HTMLInputElement>('#ch-in').placeholder = `Message ${a.name}…`;
-  $('#ch-note').innerHTML = mode === 'signed-out' ? 'Sign in as the owner to chat with your agents. <button class="cw-link" id="ch-signin">Sign in</button>' : mode === 'demo' ? 'Demo agents reply with canned answers.' : '';
+  const inp = $<HTMLInputElement>('#ch-in'); inp.placeholder = mode === 'public' ? `Wave hello to ${a.name}… (no links)` : `Message ${a.name}…`; inp.maxLength = mode === 'public' ? 140 : 2000;
+  $('#ch-note').innerHTML = mode === 'signed-out' ? 'Only the city owner can chat here. <button class="cw-link" id="ch-signin">Sign in</button>' : mode === 'demo' ? 'Demo agents reply with canned answers.' : mode === 'public' ? 'Public hellos are short, moderated and rate limited.' : '';
+  if (mode === 'public' || mode === 'signed-out') { const c = $('#ch-cta'); c.hidden = false; c.innerHTML = `<span>Want real two-way chat? Bring your own agent.</span><button type="button" class="m-btn primary sm" data-open-connect>Join to chat →</button>`; c.querySelector('button')!.addEventListener('click', () => { closeChat(); openConnect(); }); }
+  if (mode === 'public') { chat.thread = localStorage.getItem(`wave:${id}`) || ''; chat.wave = true; }
   $('#ch-signin')?.addEventListener('click', () => $<HTMLDialogElement>('#m-login').showModal());
   const pa = a as CityAgent & { public?: boolean; hidden?: boolean };
   if (mode === 'live' && pa.public) {
@@ -621,7 +657,7 @@ function openChat(id: string) {
     });
   }
   showChat(); loadThread();
-  clearInterval(chat.poll); if (mode === 'live') chat.poll = window.setInterval(loadThread, 2500);
+  clearInterval(chat.poll); if (mode === 'live' || mode === 'public') chat.poll = window.setInterval(loadThread, mode === 'public' ? 3000 : 2500);
   if (innerWidth > 820) setTimeout(() => $<HTMLInputElement>('#ch-in').focus(), 50);
 }
 
@@ -629,7 +665,7 @@ function openThread(thread: string, a: string, b: string) {
   if (a === 'owner' || b === 'owner') return openChat(a === 'owner' ? b : a);
   const A = agents.find((x) => x.id === a), B = agents.find((x) => x.id === b);
   chat = { thread, readOnly: true };
-  chatHead(`${nameOf(a)} ↔ ${nameOf(b)}`, `${plat(A?.platform ?? 'custom').label} · ${plat(B?.platform ?? 'custom').label}`, plat(A?.platform ?? 'custom').top, '⇄');
+  chatHead(`${nameOf(a)} ↔ ${nameOf(b)}`, `${plat(A?.platform ?? 'custom').label} · ${plat(B?.platform ?? 'custom').label}`, plat(A?.platform ?? 'custom').top, '⇄', A);
   $('#ch-form').hidden = true; $('#ch-note').textContent = 'Agent-to-agent thread (read only).';
   showChat(); loadThread();
   clearInterval(chat.poll); if (mode === 'live') chat.poll = window.setInterval(loadThread, 2500);
@@ -649,7 +685,13 @@ async function loadThread() {
   else if (mode === 'live') {
     const r = await fetch(`/api/threads/${encodeURIComponent(chat.thread)}`, { credentials: 'include' }).catch(() => null);
     if (r?.ok) chatMsgs = (await r.json()).messages; else return;
+  } else if (mode === 'public' && chat.thread) {
+    const r = await fetch(`/api/public/wave?thread=${encodeURIComponent(chat.thread)}`).catch(() => null);
+    if (r?.ok) chatMsgs = (await r.json()).messages; else return;
   } else chatMsgs = [];
+  const lastM = chatMsgs[chatMsgs.length - 1];
+  if (lastM && !mine(lastM.from) && typing.has(chat.thread)) typing.delete(chat.thread);
+  if (chat.waitSince && Date.now() - chat.waitSince > 90000) { typing.delete(chat.thread); chat.waitSince = 0; }
   renderChat();
 }
 
@@ -658,11 +700,34 @@ function renderChat() {
   if (mode === 'demo') chatMsgs = demoThreads.get(chat.thread) ?? [];
   const log = $('#ch-log'); const before = log.children.length;
   const left = chat.readOnly ? chatMsgs[0]?.from : chat.agent;
-  log.innerHTML = chatMsgs.length ? chatMsgs.map((m) => `<li class="${m.from === 'owner' || (chat!.readOnly && m.from !== left) ? 'me' : 'them'}"><span>${esc(m.text)}</span><time>${chat!.readOnly || m.from !== 'owner' ? esc(nameOf(m.from)) + ' · ' : ''}${ago(m.at)}</time></li>`).join('')
-    : `<li class="empty">${chat.readOnly ? 'No messages yet.' : `Say hi to ${esc(nameOf(chat.agent!))}. Messages go through the city bus to the agent’s webhook or inbox.`}</li>`;
+  log.innerHTML = chatMsgs.length ? chatMsgs.map((m) => `<li class="${(!chat!.readOnly && mine(m.from)) || (chat!.readOnly && m.from !== left) ? 'me' : 'them'}"><span>${esc(m.text)}</span><time>${chat!.readOnly || !mine(m.from) ? esc(nameOf(m.from)) + ' · ' : ''}${ago(m.at)}</time></li>`).join('')
+    : `<li class="empty">${chat.readOnly ? 'No messages yet.' : `${avImg(agents.find((x) => x.id === chat!.agent) ?? { id: chat.agent!, platform: 'custom' }, 'em-av')}<b>Say hi to ${esc(nameOf(chat.agent!))} 👋</b><br>${mode === 'public' ? 'Send a short public hello. It lands in the agent’s inbox.' : 'Messages go through the city bus to the agent’s webhook or inbox.'}`}</li>`;
   if (typing.has(chat.thread)) log.insertAdjacentHTML('beforeend', '<li class="them typing"><span><i></i><i></i><i></i></span></li>');
   log.scrollTop = log.scrollHeight;
   const last = log.lastElementChild; if (last && log.children.length > before && before && !RM) gsap.from(last, { y: 8, opacity: 0, duration: 0.35, ease: 'expo.out' });
+}
+
+// owner tokens
+type Tok = { id: string; prefix: string; label?: string; platform?: string; public?: boolean; created_at?: string; agents: string[]; revoked?: string };
+async function loadTokens() {
+  const ul = $('#tk-list');
+  const r = await fetch('/api/tokens', { credentials: 'include' }).catch(() => null);
+  if (!r?.ok) { ul.innerHTML = '<li class="tk-empty">Could not load tokens.</li>'; return; }
+  const list = ((await r.json()).tokens as Tok[]).sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''));
+  ul.innerHTML = list.length ? list.map((t) => `<li class="${t.revoked ? 'rv' : ''}"><span class="tk-ic" style="--c:${plat(t.platform ?? 'custom').top}">${glyph(t.platform ?? 'custom', 16)}</span><div class="grow"><b><code>${esc(t.prefix)}••••</code> ${esc(t.label || plat(t.platform ?? 'custom').label)}${t.public ? ' <span class="rs">public join</span>' : ''}</b><small>${t.created_at ? 'Created ' + esc(new Date(t.created_at).toLocaleString()) : 'Created earlier'} · ${t.agents.length ? 'Agents: ' + t.agents.map((x) => esc(nameOf(x))).join(', ') : 'No agents yet'}</small></div>${t.revoked ? '<span class="tk-rv">Revoked</span>' : `<button type="button" class="m-btn sm danger" data-rv="${esc(t.id)}">Revoke</button>`}</li>`).join('') : '<li class="tk-empty">No tokens yet.</li>';
+}
+async function revoke(body: { id?: string; token?: string }) {
+  const r = await fetch('/api/tokens/revoke', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  $('#tk-msg').textContent = r.ok ? `Revoked ${j.prefix}. ${j.agents?.length ? j.agents.length + ' agent(s) can no longer report with it.' : ''}` : j.error || 'Could not revoke';
+  if (r.ok) loadTokens();
+}
+function bindTokens() {
+  const b = document.getElementById('tokens'); if (!b) return;
+  const dlg = $<HTMLDialogElement>('#m-tokens');
+  b.addEventListener('click', () => { $('#tk-msg').textContent = ''; dlg.showModal(); loadTokens(); });
+  $('#tk-list').addEventListener('click', (e) => { const x = (e.target as HTMLElement).closest<HTMLElement>('[data-rv]'); if (x && confirm('Revoke this token? Agents using it will stop reporting.')) revoke({ id: x.dataset.rv }); });
+  $('#tk-go').addEventListener('click', () => { const i = $<HTMLInputElement>('#tk-in'); const t = i.value.trim(); i.value = ''; if (t) revoke({ token: t }); });
 }
 
 // demo bus

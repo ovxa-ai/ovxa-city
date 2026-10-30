@@ -1,6 +1,6 @@
 /** Pure layout for the universal city: platforms -> districts, agents -> lots. Tested in src/layout.test.ts. */
 export interface CityAgent {
-  resident?: boolean;
+  resident?: boolean; avatar?: string;
   id: string; name: string; platform: string; status: 'ok' | 'busy' | 'error' | 'idle';
   task?: string; health?: 'live' | 'stale' | 'offline'; activity?: number; pending?: number;
   updated_at?: string; first_seen?: string; metrics?: Record<string, number>;
