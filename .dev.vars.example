@@ -1,3 +1,6 @@
 OWNER_PASSWORD=change-me # password you'll use to sign in to Town Hall
 SESSION_SECRET=generate-a-long-random-string # any long random string, e.g. openssl rand -hex 32
 BOTS={} # JSON of your bots; leave {} and run `npm run setup -- bots` later, or see README
+# CITY_KEY=optional-shared-key-any-agent-can-join-with
+# OPENAI_API_KEY=sk-...      # optional: built-in live OpenAI agents
+# ANTHROPIC_API_KEY=sk-ant-... # optional: built-in live Claude agents

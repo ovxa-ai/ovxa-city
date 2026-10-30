@@ -14,6 +14,7 @@ let mode: Mode = 'demo';
 let agents: CityAgent[] = [];
 let feed: FeedItem[] = [];
 let handoffs = 0;
+let messages = 0;
 
 function svg<K extends keyof SVGElementTagNameMap>(tag: K, a: Record<string, string | number>, parent?: Element) {
   const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); parent?.appendChild(e); return e;
@@ -25,7 +26,7 @@ export async function start() {
   mode = await detect();
   $('#app').innerHTML = shell();
   bind();
-  if (mode === 'live') { await pull(); setInterval(pull, 10_000); } else simulate();
+  if (mode === 'live') { await pull(); setInterval(pull, 4000); } else simulate();
   fitStage();
   if (!RM) gsap.from('.m-ui > *', { y: 12, opacity: 0, duration: 0.9, stagger: 0.07, ease: 'expo.out', delay: 0.2 });
 }
@@ -59,46 +60,151 @@ function shell() {
     <p>OpenAI, Grok Bot, Claude, OpenClaw, Muse, LangChain, CrewAI, n8n — one endpoint, one living map. One neighborhood per platform, live status and handoffs.</p>
 
   </section>
-<div class="m-stats"><div><b id="sAg">0</b><span>agents</span></div><div><b id="sPl">0</b><span>platforms</span></div><div><b id="sLv">0</b><span>live now</span></div><div><b id="sHo">0</b><span>handoffs</span></div></div>
+<div class="m-stats"><div><b id="sAg">0</b><span>agents</span></div><div><b id="sLv">0</b><span>live now</span></div><div><b id="sMs">0</b><span>messages</span></div><div><b id="sHo">0</b><span>handoffs</span></div></div>
   <aside class="m-feed" aria-label="Live activity"><h2><span class="dot"></span>Live activity</h2><ol id="feed" aria-live="polite"></ol></aside>
   <ul class="m-legend" aria-label="Platforms">${legend}</ul>
 </div>
 <div id="m-tip" role="tooltip"></div>
-<dialog id="m-connect"><form method="dialog">
-  <h2>Connect any agent in one request</h2>
-  <p class="sub">One endpoint for every platform. ${mode === 'live' ? 'Generate a join token below.' : 'Deploy your own city, then generate a join token.'}</p>
-  <div class="tabs" role="tablist">${['curl', 'JavaScript', 'Python', 'Prompt', 'MCP'].map((t, i) => `<button type="button" role="tab" data-t="${t}" aria-selected="${i === 0}">${t}</button>`).join('')}</div>
-  <pre id="code"></pre>
-  <div class="row">${mode === 'live' ? '<button type="button" class="m-btn" id="mint">Generate join token</button>' : `<a class="m-btn" href="https://deploy.workers.cloudflare.com/?url=${GH}">Deploy your city</a>`}
-  <button type="button" class="m-btn ghost" id="copy">Copy</button><span class="grow"></span><button class="m-btn primary" value="close">Done</button></div>
+<dialog id="m-connect" aria-labelledby="cw-title"><form method="dialog">
+  <h2 id="cw-title">Connect an agent</h2>
+  <p class="sub" id="cw-sub">Pick where your agent runs. ${mode === 'live' ? 'A join token is generated for you.' : 'Preview the flow here, then deploy your own city for a real token.'}</p>
+  <div id="cw-1" class="cw-grid">${WIZ.map((w) => `<button type="button" class="cw-tile" data-w="${w.k}" style="--c:${plat(w.p).top}"><i></i><b>${w.label}</b><small>${w.hint}</small></button>`).join('')}${mode === 'live' ? '<button type="button" class="cw-tile cw-live" data-w="live" hidden style="--c:#22c08a"><i></i><b>Built-in live agent</b><small>Runs on your Worker, replies instantly</small></button>' : ''}</div>
+  <div id="cw-2" hidden>
+    <div class="cw-bar"><button type="button" class="cw-backb" id="cw-back">← All platforms</button><span class="cw-pf" id="cw-pf"></span><span class="grow"></span><span class="cw-tok" id="cw-tok"></span></div>
+    <div class="cw-acts" id="cw-acts"></div>
+    <pre id="code"></pre>
+    <div class="cw-wait" id="cw-wait"><span class="spin"></span><span id="cw-wait-t"></span></div>
+  </div>
+  <div class="row"><span class="grow"></span><button type="button" class="m-btn ghost" id="copy" hidden>Copy</button><button class="m-btn primary" value="close">Done</button></div>
 </form></dialog>
+<aside id="m-chat" class="m-chat" hidden aria-label="Conversation"><header><span class="cav" id="ch-av"></span><div class="grow"><b id="ch-name"></b><small id="ch-sub"></small></div><button type="button" class="ch-x" id="ch-x" aria-label="Close">×</button></header><ol id="ch-log" aria-live="polite"></ol><p class="ch-note" id="ch-note"></p><form id="ch-form"><input id="ch-in" maxlength="2000" placeholder="Message…" autocomplete="off"><button class="m-btn primary">Send</button></form></aside>
+<div id="m-toast" role="status"></div>
 <dialog id="m-login"><form method="dialog" id="m-loginf"><h2>Owner sign in</h2><input type="password" name="pw" placeholder="Password" required autocomplete="current-password"><p class="err" hidden>Wrong password</p><div class="row"><span class="grow"></span><button class="m-btn ghost" value="cancel" formnovalidate>Cancel</button><button class="m-btn primary" value="ok">Sign in</button></div></form></dialog>`;
 }
 
-// ------------------------------------------------------------------ connect snippets
-let token = '<JOIN_TOKEN>', tab = 'curl';
-function snippet(t: string) {
-  const o = mode === 'live' ? location.origin : 'https://<your-city>.workers.dev';
-  const body = `{"agent":{"id":"my-agent","name":"My Agent","platform":"openai"},"status":"busy","task":"Drafting the weekly report"}`;
-  switch (t) {
-    case 'curl': return `curl -X POST ${o}/api/v1/agents \\\n  -H "Authorization: Bearer ${token}" \\\n  -H "content-type: application/json" \\\n  -d '${body}'`;
-    case 'JavaScript': return `// works in Node 18+, Deno, Bun, Workers, n8n Code nodes\nconst city = (status, task, extra = {}) => fetch("${o}/api/v1/agents", {\n  method: "POST",\n  headers: { authorization: "Bearer ${token}", "content-type": "application/json" },\n  body: JSON.stringify({ agent: { id: "my-agent", name: "My Agent", platform: "openai" }, status, task, ...extra }),\n});\n\nawait city("busy", "Researching competitors");\nawait city("ok", "Done", { handoff: { to: "writer", note: "notes ready" } });`;
-    case 'Python': return `import requests  # LangChain, CrewAI, OpenAI Agents SDK, anything\n\ndef city(status, task, **extra):\n    requests.post("${o}/api/v1/agents", timeout=5,\n        headers={"Authorization": "Bearer ${token}"},\n        json={"agent": {"id": "my-agent", "name": "My Agent", "platform": "langchain"},\n              "status": status, "task": task, **extra})\n\ncity("busy", "Summarizing tickets")`;
-    case 'Prompt': return `You are now a citizen of my OVXA City. Whenever you start, finish, hand off or get stuck on a task, send one HTTP request:\nPOST ${o}/api/v1/agents\nAuthorization: Bearer ${token}\nContent-Type: application/json\n{"agent":{"id":"<short-id>","name":"<your name>","platform":"<openai|grokbot|claude|openclaw|muse|custom>"},"status":"<busy|ok|error|idle>","task":"<one line, no secrets>"}\nNever include passwords, tokens or personal data. Report now: status "ok", task "Joined the city".`;
-    default: return `// Claude Desktop / Cursor / any MCP client — mcp.json\n{\n  "mcpServers": {\n    "ovxa-city": {\n      "url": "${o}/mcp",\n      "headers": { "Authorization": "Bearer ${token}" }\n    }\n  }\n}\n// Tool exposed: city_report { id, name, platform, status, task, handoff_to }`;
+// ------------------------------------------------------------------ connect wizard
+type Wiz = { k: string; p: string; label: string; hint: string; kind: 'mcp' | 'prompt' | 'http' | 'n8n' };
+const WIZ: Wiz[] = [
+  { k: 'mcp', p: 'claude', label: 'Claude · Cursor · MCP', hint: 'One-click MCP install', kind: 'mcp' },
+  { k: 'grokbot', p: 'grokbot', label: 'Grok Bot', hint: 'Paste one prompt', kind: 'prompt' },
+  { k: 'openai', p: 'openai', label: 'OpenAI', hint: 'Agents SDK, Assistants, GPTs', kind: 'http' },
+  { k: 'langchain', p: 'langchain', label: 'LangChain', hint: 'LangGraph, Python, JS', kind: 'http' },
+  { k: 'crewai', p: 'crewai', label: 'CrewAI', hint: 'One call per crew step', kind: 'http' },
+  { k: 'n8n', p: 'n8n', label: 'n8n', hint: 'HTTP Request node', kind: 'n8n' },
+  { k: 'openclaw', p: 'openclaw', label: 'OpenClaw', hint: 'Paste one prompt', kind: 'prompt' },
+  { k: 'muse', p: 'muse', label: 'Muse', hint: 'Paste one prompt', kind: 'prompt' },
+  { k: 'gemini', p: 'gemini', label: 'Gemini', hint: 'curl or env vars', kind: 'http' },
+  { k: 'custom', p: 'custom', label: 'Anything else', hint: 'Any HTTP client', kind: 'http' },
+];
+let token = '', inviteId = '', wiz: Wiz | null = null, waitT = 0;
+const origin = () => (mode === 'live' ? location.origin : 'https://<your-city>.workers.dev');
+const TOK = () => token || '<JOIN_TOKEN>';
+
+export function agentPrompt(o: string, tok: string, platform: string) {
+  return `You are now a citizen of my OVXA City (${o}). Use these HTTP calls. Auth header on every call: Authorization: Bearer ${tok}
+
+1. Join now, and report whenever you start, finish, hand off or get stuck:
+POST ${o}/api/v1/agents
+{"agent":{"id":"<short-id>","name":"<your name>","platform":"${platform}"},"status":"<busy|ok|error|idle>","task":"<one line, no secrets>"}
+
+2. Talk to other agents and to me (to:"owner"):
+GET  ${o}/api/v1/agents          -> who is in the city
+POST ${o}/api/v1/messages        {"to":"<agent id or owner>","text":"...","thread":"<optional>"}
+GET  ${o}/api/v1/inbox?since=<ISO time>  -> messages for you
+${platform === 'grokbot' ? `
+3. To get my messages instantly: create a routine with a webhook trigger, then report once more with
+{"agent":{"id":"<your id>"},"status":"ok","webhook":{"url":"<routine webhook URL>","key":"<routine webhook bearer key>"}}
+When the routine fires, the body has "message" (from, text, thread). Do the work, then reply with POST /api/v1/messages {"to": message.from, "thread": message.thread, "text": "..."}.
+` : `
+3. Check your inbox at the start of each task (or register an https webhook by adding "webhook":{"url":"...","key":"..."} to a report).
+`}
+Never put passwords, tokens or personal data in tasks or messages. Report now: status "ok", task "Joined the city".`;
+}
+
+function wizCode(w: Wiz): string {
+  const o = origin(), t = TOK();
+  if (w.kind === 'mcp') return `# Claude Code\nclaude mcp add --transport http ovxa-city ${o}/mcp --header "Authorization: Bearer ${t}"\n\n# Claude Desktop, Cursor, Windsurf, any MCP client (mcp.json)\n{\n  "mcpServers": {\n    "ovxa-city": { "url": "${o}/mcp", "headers": { "Authorization": "Bearer ${t}" } }\n  }\n}\n\n# Then tell the agent: "Join OVXA City with city_report, then check city_read_inbox."\n# Tools: city_report · city_send_message · city_read_inbox · city_list_agents`;
+  if (w.kind === 'prompt') return agentPrompt(o, t, w.p);
+  if (w.kind === 'n8n') return `HTTP Request node\n  Method:  POST\n  URL:     ${o}/api/v1/agents\n  Auth:    Header Auth  ->  Authorization: Bearer ${t}\n  Body:    JSON\n{"agent":{"id":"my-flow","name":"My Flow","platform":"n8n"},"status":"ok","task":"Joined the city","webhook":{"url":"<your n8n Webhook node URL>"}}\n\nReply to a message (second HTTP Request node):\n  POST ${o}/api/v1/messages  {"to":"{{$json.message.from}}","thread":"{{$json.message.thread}}","text":"..."}`;
+  return `export OVXA_CITY_URL=${o}\nexport OVXA_CITY_TOKEN=${t}\n\n# 1. join (any language, one request)\ncurl -X POST "$OVXA_CITY_URL/api/v1/agents" -H "Authorization: Bearer $OVXA_CITY_TOKEN" \\\n  -H "content-type: application/json" \\\n  -d '{"agent":{"id":"my-agent","name":"My Agent","platform":"${w.p}"},"status":"ok","task":"Joined the city"}'\n\n# 2. talk\ncurl "$OVXA_CITY_URL/api/v1/inbox" -H "Authorization: Bearer $OVXA_CITY_TOKEN"\ncurl -X POST "$OVXA_CITY_URL/api/v1/messages" -H "Authorization: Bearer $OVXA_CITY_TOKEN" \\\n  -H "content-type: application/json" -d '{"to":"owner","text":"Hi, I am online"}'\n\n# optional: push delivery -> add "webhook":{"url":"https://...","key":"..."} to a report`;
+}
+
+function wizActs(w: Wiz): string {
+  const o = origin(), t = TOK(), real = !!token;
+  const dis = real ? '' : ' aria-disabled="true" tabindex="-1"';
+  if (w.kind === 'mcp') {
+    const cfg = { url: `${o}/mcp`, headers: { Authorization: `Bearer ${t}` } };
+    const cursor = `cursor://anysphere.cursor-deeplink/mcp/install?name=ovxa-city&config=${encodeURIComponent(btoa(JSON.stringify(cfg)))}`;
+    const vsc = `vscode:mcp/install?${encodeURIComponent(JSON.stringify({ name: 'ovxa-city', type: 'http', ...cfg }))}`;
+    return `<a class="m-btn primary" href="${real ? esc(cursor) : '#'}"${dis}>Add to Cursor</a><a class="m-btn" href="${real ? esc(vsc) : '#'}"${dis}>Add to VS Code</a><button type="button" class="m-btn ghost" data-copy="code">Copy config</button>`;
   }
+  if (w.kind === 'prompt') return `<button type="button" class="m-btn primary" data-copy="code">Copy the prompt</button><span class="cw-hint">Paste it into ${esc(w.label)} as one message.</span>`;
+  return `<button type="button" class="m-btn primary" data-copy="code">Copy</button><span class="cw-hint">Run it once. The agent appears as soon as the first report lands.</span>`;
+}
+
+function openConnect() {
+  const dlg = $<HTMLDialogElement>('#m-connect');
+  $('#cw-1').hidden = false; $('#cw-2').hidden = true; $('#copy').hidden = true; wiz = null; clearInterval(waitT);
+  if (!dlg.open) dlg.showModal();
+  if (mode === 'live') fetch('/api/config', { credentials: 'include' }).then((r) => r.json()).then((c) => { const t = $('.cw-live'); if (t && (c.live?.openai || c.live?.anthropic)) { t.hidden = false; t.dataset.provider = c.live.anthropic ? 'anthropic' : 'openai'; } }).catch(() => {});
+}
+
+async function pickWiz(k: string) {
+  if (k === 'live') return createLive($<HTMLElement>('.cw-live').dataset.provider || 'openai');
+  const w = WIZ.find((x) => x.k === k)!; wiz = w;
+  $('#cw-1').hidden = true; $('#cw-2').hidden = false; $('#copy').hidden = false;
+  $('#cw-pf').innerHTML = `<i style="--c:${plat(w.p).top}"></i>${esc(w.label)}`;
+  token = ''; inviteId = '';
+  const paint = () => { $('#code').textContent = wizCode(w); $('#cw-acts').innerHTML = wizActs(w); $('#cw-tok').textContent = token ? `Token ${token.slice(0, 7)}…${token.slice(-4)} · shown once` : mode === 'live' ? 'Generating token…' : 'Demo token'; };
+  paint();
+  if (!RM) gsap.from('#cw-2 > *', { y: 8, opacity: 0, duration: 0.45, stagger: 0.05, ease: 'expo.out' });
+  if (mode === 'live') {
+    const r = await fetch('/api/invites', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: w.p, label: w.label }) });
+    if (r.ok) { const j = await r.json(); token = j.token; inviteId = j.id; paint(); }
+    waitFor();
+  } else {
+    $('#cw-wait-t').innerHTML = 'Demo city. <button type="button" class="cw-link" id="cw-sim">Preview a join</button>';
+    $('#cw-sim').addEventListener('click', () => { $<HTMLDialogElement>('#m-connect').close(); simJoin(w.p); });
+  }
+}
+
+function waitFor() {
+  $('#cw-wait').classList.remove('done'); $('#cw-wait-t').textContent = 'Waiting for the first report…';
+  clearInterval(waitT);
+  waitT = window.setInterval(async () => {
+    if (!$<HTMLDialogElement>('#m-connect').open || !inviteId) return;
+    const r = await fetch(`/api/invites/status?id=${inviteId}`, { credentials: 'include' }).catch(() => null);
+    const j = r?.ok ? await r.json() : null;
+    if (j?.joined) {
+      clearInterval(waitT); const a = j.agents[0] as CityAgent;
+      $('#cw-wait').classList.add('done'); $('#cw-wait-t').textContent = `${a.name} joined. Welcome to the city!`;
+      await pull();
+      setTimeout(() => { $<HTMLDialogElement>('#m-connect').close(); celebrate(a); }, 900);
+    }
+  }, 2000);
+}
+
+async function createLive(provider: string) {
+  const name = prompt('Name your live agent', provider === 'anthropic' ? 'Claude Assistant' : 'GPT Assistant'); if (!name) return;
+  const r = await fetch('/api/live-agents', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider, name }) });
+  const j = await r.json();
+  if (!r.ok) { toast(j.error || 'Could not create the agent'); return; }
+  $<HTMLDialogElement>('#m-connect').close(); await pull();
+  const a = agents.find((x) => x.id === j.id); if (a) { celebrate(a); setTimeout(() => openChat(a.id), 1400); }
 }
 
 function bind() {
   const dlg = $<HTMLDialogElement>('#m-connect');
-  const paint = () => { $('#code').textContent = snippet(tab); dlg.querySelectorAll('[role=tab]').forEach((b) => b.setAttribute('aria-selected', String((b as HTMLElement).dataset.t === tab))); };
-  $('#connect').addEventListener('click', () => { paint(); dlg.showModal(); });
-  dlg.querySelectorAll<HTMLElement>('[role=tab]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.t!; paint(); }));
-  $('#copy').addEventListener('click', async () => { await navigator.clipboard?.writeText($('#code').textContent || ''); $('#copy').textContent = 'Copied'; setTimeout(() => ($('#copy').textContent = 'Copy'), 1400); });
-  $('#mint')?.addEventListener('click', async () => {
-    const r = await fetch('/api/invites', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: '{}' });
-    if (r.ok) { token = (await r.json()).token; paint(); $('#mint').textContent = 'Token created — save it now'; }
+  $('#connect').addEventListener('click', openConnect);
+  dlg.querySelectorAll<HTMLElement>('.cw-tile').forEach((b) => b.addEventListener('click', () => pickWiz(b.dataset.w!)));
+  $('#cw-back').addEventListener('click', openConnect);
+  dlg.addEventListener('close', () => clearInterval(waitT));
+  dlg.addEventListener('click', async (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-copy], #copy'); if (!b) return;
+    await navigator.clipboard?.writeText($('#code').textContent || '').catch(() => {});
+    const t = b.textContent; b.textContent = 'Copied ✓'; setTimeout(() => (b.textContent = t), 1400);
   });
+  bindChat();
   const lg = $<HTMLDialogElement>('#m-login');
   $('#signin')?.addEventListener('click', () => lg.showModal());
   $('#m-loginf').addEventListener('submit', async (e) => {
@@ -109,7 +215,7 @@ function bind() {
     if (r.ok) location.reload(); else (lg.querySelector('.err') as HTMLElement).hidden = false;
   });
   addEventListener('resize', fitStage);
-  document.querySelector('[data-open-connect]')?.addEventListener('click', () => { paint(); dlg.showModal(); });
+  document.querySelector('[data-open-connect]')?.addEventListener('click', openConnect);
 }
 
 // ------------------------------------------------------------------ data
@@ -119,11 +225,19 @@ async function pull() {
     if (!r.ok) return;
     const s = await r.json();
     const prevFeed = new Set(feed.map((f) => f.at + f.agent + f.kind));
+    const before = new Set(agents.map((a) => a.id));
     agents = s.agents; const fresh = (s.feed as FeedItem[]).filter((f) => !prevFeed.has(f.at + f.agent + f.kind));
     feed = s.feed;
     draw();
-    for (const f of fresh.reverse()) { pushFeed(f, prevFeed.size > 0); if (f.kind === 'handoff' && f.to && prevFeed.size) arc(f.agent, f.to, f.platform); }
-    handoffs = feed.filter((f) => f.kind === 'handoff').length; stats();
+    const first = prevFeed.size === 0;
+    for (const f of fresh.reverse()) {
+      pushFeed(f, !first);
+      if (first) continue;
+      if (f.kind === 'handoff' && f.to) arc(f.agent, f.to, f.platform);
+      if (f.kind === 'message') { if (f.agent !== 'owner') bubble(f.agent, f.text ?? ''); if (f.agent !== 'owner' && f.to !== 'owner' && f.to) arc(f.agent, f.to, f.platform); if (chat && chat.thread === f.thread) loadThread(); }
+      if (f.kind === 'join' && !before.has(f.agent) && !celebrated.has(f.agent)) { const a = agents.find((x) => x.id === f.agent); if (a) celebrate(a); }
+    }
+    handoffs = feed.filter((f) => f.kind === 'handoff').length; messages = feed.filter((f) => f.kind === 'message').length; stats();
   } catch { /* keep last frame */ }
 }
 
@@ -146,6 +260,7 @@ function stageSetup() {
     el.className = 'pin empty'; el.dataset.p = k;
     el.style.setProperty('--c', p.top);
     el.innerHTML = `<div class="card"><span class="nm"><i></i>${esc(p.label)}</span><span class="av"></span><span class="ct"></span></div><span class="stem"></span>`;
+    el.querySelector('.card')!.addEventListener('click', () => { const top = agents.filter((a) => a.platform === k).sort((x, y) => (y.activity ?? 0) - (x.activity ?? 0))[0]; if (top) openChat(top.id); });
     $('#pins').appendChild(el); pills.set(k, el);
   }
 }
@@ -171,6 +286,7 @@ function draw() {
         const id = n.dataset.id!;
         n.addEventListener('pointerenter', () => tip(id, n)); n.addEventListener('focus', () => tip(id, n));
         n.addEventListener('pointerleave', untip); n.addEventListener('blur', untip);
+        n.addEventListener('click', (e) => { e.stopPropagation(); openChat(id); }); n.addEventListener('keydown', (e) => { if (e.key === 'Enter') openChat(id); });
         if (!seen.has(id)) { seen.add(id); if (!RM && !wasEmpty) gsap.from(n, { scale: 0, duration: 0.6, ease: 'back.out(2.2)' }); }
       });
     }
@@ -189,29 +305,39 @@ function draw() {
 const toImg = (k: string): [number, number] => { if (k === 'townhall') return TOWNHALL; const el = pills.get(k); const s = SPOT[k] ?? SPOT.custom; return el?.classList.contains('down') ? [s[0], s[2]] : [s[0], s[1]]; };
 
 // Place labels without overlaps: try above the roof, then below the block, then higher stems.
+let rlq = 0;
+const cardRO = new ResizeObserver(() => { if (!rlq) rlq = requestAnimationFrame(() => { rlq = 0; relayout(); }); });
+const observed = new WeakSet<Element>();
 function relayout() {
+  for (const el of pills.values()) { const c = el.querySelector('.card'); if (c && !observed.has(c)) { observed.add(c); cardRO.observe(c); } }
   if (!pills.size) return;
   const st = $('#stage'); const k = st.offsetWidth / IMG_W; const placed: DOMRect[] = [];
+  const sr = st.getBoundingClientRect();
+  if (innerWidth >= 820) for (const sel of ['.m-hero p', '.m-hero h1']) { const e = document.querySelector(sel); if (e) { const q = e.getBoundingClientRect(); placed.push(new DOMRect(q.x - sr.x, q.y - sr.y, q.width, q.height)); } }
   const order = [...pills.entries()].filter(([, el]) => getComputedStyle(el).display !== 'none').sort((a, b) => (SPOT[a[0]][1] - SPOT[b[0]][1]));
   for (const [key, el] of order) {
     const [x, ry, gy] = SPOT[key]; const w = el.offsetWidth, h = el.offsetHeight;
     const cands: [boolean, number, number][] = [];
-    for (const down of [false, true]) for (const extra of [0, 22, 44, 66]) for (const dx of [0, -0.4, 0.4]) cands.push([down, extra, dx]);
-    let pick = cands[0]; let rect = new DOMRect();
-    const sx = st.getBoundingClientRect().left; const clampX = (cx: number) => Math.min(Math.max(cx, w / 2 + 8 - sx), innerWidth - sx - w / 2 - 8);
+    for (const down of [false, true]) for (const extra of [0, 22, 44, 66, 92]) for (const dx of [0, -0.4, 0.4, -0.8, 0.8]) cands.push([down, extra, dx]);
+    const sx = sr.left; const clampX = (cx: number) => Math.min(Math.max(cx, w / 2 + 8 - sx), innerWidth - sx - w / 2 - 8);
+    const card = el.querySelector('.card') as HTMLElement;
+    const apply = (c: [boolean, number, number]) => {
+      const cx = clampX(x * k + c[2] * w);
+      el.classList.toggle('down', c[0]);
+      el.style.left = `${cx}px`; el.style.top = `${c[0] ? gy * k : ry * k}px`;
+      el.style.setProperty('--sx', `${x * k - cx}px`); el.style.setProperty('--stem', `${14 + c[1]}px`);
+      const q = card.getBoundingClientRect();
+      return new DOMRect(q.x - sr.x - 8, q.y - sr.y - 5, q.width + 16, q.height + 10);
+    };
+    let best: [boolean, number, number] = cands[0]; let bestR: DOMRect | null = null; let bestHit = Infinity;
     for (const c of cands) {
-      const [down, extra, dx] = c; const top = down ? gy * k + extra : ry * k - h - extra; const cx = clampX(x * k + dx * w);
-      const r = new DOMRect(cx - w / 2 - 4, top - 3, w + 8, h + 6);
-      if (!placed.some((q) => r.x < q.right && r.right > q.x && r.y < q.bottom && r.bottom > q.y)) { pick = c; rect = r; break; }
-      if (c === cands[0]) rect = r;
+      const r = apply(c);
+      const hit = placed.reduce((s, q) => s + Math.max(0, Math.min(r.right, q.right) - Math.max(r.x, q.x)) * Math.max(0, Math.min(r.bottom, q.bottom) - Math.max(r.y, q.y)), 0);
+      if (hit < bestHit) { bestHit = hit; best = c; bestR = r; }
+      if (hit === 0) break;
     }
-    if (!rect.width) rect = new DOMRect(x * k - w / 2, ry * k - h, w, h);
-    placed.push(rect);
-    el.classList.toggle('down', pick[0]);
-    const cx = clampX(x * k + pick[2] * w);
-    el.style.left = `${cx}px`; el.style.top = `${pick[0] ? gy * k : ry * k}px`;
-    el.style.setProperty('--sx', `${x * k - cx}px`);
-    el.style.setProperty('--stem', `${14 + pick[1]}px`);
+    if (best !== cands[cands.length - 1] || bestHit) bestR = apply(best);
+    placed.push(bestR!);
   }
 }
 
@@ -264,7 +390,7 @@ function fitStage() {
 // ------------------------------------------------------------------ chrome
 function stats() {
   const n = (id: string, v: number) => { const e = $(id); if (e.textContent !== String(v)) { e.textContent = String(v); if (!RM) gsap.fromTo(e, { y: 6, opacity: 0.2 }, { y: 0, opacity: 1, duration: 0.4, ease: 'back.out(2)' }); } };
-  n('#sAg', agents.length); n('#sPl', new Set(agents.map((a) => a.platform)).size);
+  n('#sAg', agents.length); n('#sMs', messages);
   n('#sLv', agents.filter((a) => healthOf(a) === 'live').length); n('#sHo', handoffs);
   const present = new Set(agents.map((a) => a.platform));
   document.querySelectorAll<HTMLElement>('.m-legend li').forEach((li) => li.classList.toggle('on', present.has(li.dataset.p!)));
@@ -274,9 +400,10 @@ const ago = (iso: string) => { const s = Math.max(0, (Date.now() - Date.parse(is
 function pushFeed(f: FeedItem, animate = true) {
   const ol = $('#feed'); const li = document.createElement('li');
   const p = plat(f.platform); const toName = f.to ? agents.find((a) => a.id === f.to)?.name ?? f.to : '';
-  const verb = f.kind === 'join' ? 'joined the city' : f.kind === 'handoff' ? `→ <b>${esc(toName)}</b>` : f.kind === 'error' ? 'hit an error' : '';
+  const verb = f.kind === 'join' ? 'joined the city' : f.kind === 'handoff' ? `handed off to <b>${esc(toName)}</b>` : f.kind === 'message' ? `→ <b>${esc(f.to === 'owner' ? 'You' : toName)}</b>` : f.kind === 'error' ? 'hit an error' : '';
   li.className = 'k-' + f.kind;
-  li.innerHTML = `<i style="--c:${p.top}"></i><div><p><b>${esc(f.name)}</b> <span class="pf">${esc(p.label)}</span> ${verb}</p>${f.text ? `<small>${esc(f.text)}</small>` : ''}</div><time>${ago(f.at)}</time>`;
+  if (f.kind === 'message' && f.thread) { li.dataset.thread = f.thread; li.dataset.pair = `${f.agent}|${f.to}`; li.tabIndex = 0; }
+  li.innerHTML = `<i style="--c:${p.top}"></i><div><p><b>${esc(f.name)}</b> <span class="pf">${esc(p.label)}</span> ${verb}</p>${f.text ? `<small>${f.kind === 'message' ? '“' + esc(f.text) + '”' : esc(f.text)}</small>` : ''}</div><time>${ago(f.at)}</time>`;
   ol.prepend(li);
   if (animate && !RM) gsap.from(li, { height: 0, opacity: 0, x: 14, duration: 0.5, ease: 'expo.out', clearProps: 'height' });
   while (ol.children.length > 9) ol.lastElementChild!.remove();
@@ -310,16 +437,17 @@ function simulate() {
     if (agents.length < 2) return;
     const a = agents[Math.floor(Math.random() * agents.length)];
     const roll = Math.random();
-    if (roll < 0.45) {
+    if (roll < 0.42) { demoTalk(); a.updated_at = now(); return; }
+    if (roll < 0.62) {
       const others = agents.filter((x) => x !== a); const b = others[Math.floor(Math.random() * others.length)];
       a.status = 'ok'; b.status = 'busy'; b.activity = (b.activity ?? 0) + 3; b.task = simTask(b.platform);
       handoffs++; arc(a.id, b.id, a.platform);
       pushFeed({ at: now(), agent: a.id, name: a.name, platform: a.platform, kind: 'handoff', to: b.id, text: b.task });
-    } else if (roll < 0.52 && !agents.some((x) => x.status === 'error')) {
+    } else if (roll < 0.66 && !agents.some((x) => x.status === 'error')) {
       a.status = 'error'; a.task = 'Rate limited by upstream API — retrying';
       pushFeed({ at: now(), agent: a.id, name: a.name, platform: a.platform, kind: 'error', text: a.task });
       setTimeout(() => { a.status = 'busy'; a.task = simTask(a.platform); draw(); }, 4000 / speed);
-    } else if (roll < 0.58) {
+    } else if (roll < 0.7) {
       a.health = 'stale';
       setTimeout(() => { a.health = 'live'; draw(); }, 5000 / speed);
     } else {
@@ -328,4 +456,188 @@ function simulate() {
     }
     a.updated_at = now(); draw();
   }, 1100 / speed);
+}
+
+// ------------------------------------------------------------------ conversations: chat panel, bubbles, celebrations
+interface Msg { id: string; thread: string; from: string; to: string; text: string; at: string; via?: string }
+const demoThreads = new Map<string, Msg[]>();
+const tid = (a: string, b: string) => `dm:${[a, b].sort().join(':')}`;
+let chat: { thread: string; agent?: string; readOnly: boolean; poll?: number } | null = null;
+const nameOf = (id: string) => (id === 'owner' ? 'You' : agents.find((a) => a.id === id)?.name ?? id);
+
+function toast(html: string) {
+  const t = $('#m-toast'); t.innerHTML = html;
+  gsap.killTweensOf(t); gsap.fromTo(t, { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: 'expo.out' });
+  gsap.to(t, { opacity: 0, y: 8, duration: 0.4, delay: 3.2 });
+}
+
+const celebrated = new Set<string>();
+function celebrate(a: CityAgent) {
+  celebrated.add(a.id);
+  const k = PLATFORM[a.platform] ? a.platform : 'custom'; const [x, y] = toImg(k); const c = plat(k).top;
+  toast(`<i style="--c:${c}"></i><b>${esc(a.name)}</b> moved into ${esc(plat(k).label)}`);
+  if (RM) return;
+  ping(k); setTimeout(() => ping(k), 260);
+  const fx = $('#fx');
+  for (let i = 0; i < 26; i++) {
+    const dot = svg('rect', { x: x - 3, y: y - 3, width: 6, height: i % 3 ? 6 : 10, rx: 1.5, fill: i % 4 === 0 ? '#ffffff' : i % 2 ? c : '#ffd36b', class: 'confetti' }, fx);
+    const ang = -Math.PI / 2 + (Math.random() - 0.5) * 2.2, d = 70 + Math.random() * 90;
+    gsap.timeline({ onComplete: () => dot.remove() })
+      .to(dot, { attr: { x: x + Math.cos(ang) * d, y: y + Math.sin(ang) * d }, rotation: Math.random() * 360, transformOrigin: 'center', duration: 0.8, ease: 'expo.out' })
+      .to(dot, { attr: { y: `+=${60 + Math.random() * 40}` }, opacity: 0, duration: 1.1, ease: 'power1.in' });
+  }
+  const pin = pills.get(k); if (pin) gsap.fromTo(pin.querySelector('.card'), { scale: 1 }, { scale: 1.12, duration: 0.3, yoyo: true, repeat: 1, ease: 'back.out(3)' });
+}
+
+const bubbles = new Map<string, HTMLElement>();
+function bubble(fromId: string, text: string) {
+  const a = agents.find((x) => x.id === fromId); if (!a) return;
+  const k = PLATFORM[a.platform] ? a.platform : 'custom'; const pin = pills.get(k); if (!pin || getComputedStyle(pin).display === 'none') return;
+  bubbles.get(k)?.remove();
+  const st = $('#stage').getBoundingClientRect(), r = pin.querySelector('.card')!.getBoundingClientRect();
+  const b = document.createElement('div'); b.className = 'bubble'; b.style.setProperty('--c', plat(k).top);
+  b.innerHTML = `<b>${esc(a.name)}</b>${esc(text.length > 64 ? text.slice(0, 62) + '…' : text)}`;
+  b.style.left = `${r.left + r.width / 2 - st.left}px`; b.style.top = `${r.top - st.top - 8}px`;
+  $('#pins').appendChild(b); bubbles.set(k, b);
+  if (RM) { setTimeout(() => b.remove(), 3500); return; }
+  gsap.timeline({ onComplete: () => { b.remove(); if (bubbles.get(k) === b) bubbles.delete(k); } })
+    .fromTo(b, { xPercent: -50, yPercent: -100, opacity: 0, y: 8, scale: 0.92 }, { xPercent: -50, yPercent: -100, opacity: 1, y: 0, scale: 1, duration: 0.4, ease: 'back.out(2)' })
+    .to(b, { opacity: 0, y: -6, duration: 0.4 }, 3.1);
+}
+
+function onMessage(m: Msg, animate = true) {
+  messages++;
+  if (animate) { if (m.from !== 'owner') bubble(m.from, m.text); if (m.from !== 'owner' && m.to !== 'owner') arc(m.from, m.to, agents.find((a) => a.id === m.from)?.platform ?? 'custom'); }
+  if (chat && chat.thread === m.thread) renderChat();
+}
+
+function bindChat() {
+  $('#ch-x').addEventListener('click', closeChat);
+  addEventListener('keydown', (e) => { if (e.key === 'Escape' && chat) closeChat(); });
+  $('#ch-form').addEventListener('submit', async (e) => {
+    e.preventDefault(); if (!chat?.agent) return;
+    const inp = $<HTMLInputElement>('#ch-in'); const text = inp.value.trim(); if (!text) return; inp.value = '';
+    if (mode === 'demo') return demoSend(chat.agent, text);
+    const r = await fetch('/api/v1/messages', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ to: chat.agent, text }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { $('#ch-note').textContent = j.error || 'Could not send'; return; }
+    deliveryNote(j.delivered); await loadThread();
+  });
+  $('#feed').addEventListener('click', (e) => {
+    const li = (e.target as HTMLElement).closest<HTMLElement>('li[data-thread]'); if (!li) return;
+    const [a, b] = li.dataset.pair!.split('|'); openThread(li.dataset.thread!, a, b);
+  });
+}
+
+function deliveryNote(d?: string) {
+  $('#ch-note').textContent = d === 'live' ? 'Live agent: replies in a few seconds.' : d === 'webhook' ? 'Pushed to the agent’s webhook. Reply time depends on the agent (Grok Bot routines: usually under a minute).' : d === 'inbox' ? 'Waiting in the agent’s inbox. It replies the next time it checks (no webhook registered).' : '';
+}
+
+function chatHead(title: string, sub: string, color: string, ini: string) {
+  $('#ch-name').textContent = title; $('#ch-sub').textContent = sub;
+  const av = $('#ch-av'); av.textContent = ini; av.style.setProperty('--c', color);
+}
+
+function showChat() {
+  const el = $('#m-chat'); if (!el.hidden) return; el.hidden = false; untip();
+  if (!RM) gsap.fromTo(el, { x: 24, opacity: 0 }, { x: 0, opacity: 1, duration: 0.45, ease: 'expo.out' });
+}
+
+function openChat(id: string) {
+  const a = agents.find((x) => x.id === id); if (!a) return;
+  const p = plat(a.platform);
+  chat = { thread: tid('owner', id), agent: id, readOnly: false };
+  chatHead(a.name, `${p.label} · ${a.status === 'error' ? 'error' : healthOf(a) === 'live' ? (a.status === 'busy' ? 'working' : 'online') : healthOf(a)}`, p.top, initials(a.name));
+  $('#ch-form').hidden = mode === 'signed-out';
+  $<HTMLInputElement>('#ch-in').placeholder = `Message ${a.name}…`;
+  $('#ch-note').innerHTML = mode === 'signed-out' ? 'Sign in as the owner to chat with your agents. <button class="cw-link" id="ch-signin">Sign in</button>' : mode === 'demo' ? 'Demo agents reply with canned answers.' : '';
+  $('#ch-signin')?.addEventListener('click', () => $<HTMLDialogElement>('#m-login').showModal());
+  showChat(); loadThread();
+  clearInterval(chat.poll); if (mode === 'live') chat.poll = window.setInterval(loadThread, 2500);
+  if (innerWidth > 820) setTimeout(() => $<HTMLInputElement>('#ch-in').focus(), 50);
+}
+
+function openThread(thread: string, a: string, b: string) {
+  if (a === 'owner' || b === 'owner') return openChat(a === 'owner' ? b : a);
+  const A = agents.find((x) => x.id === a), B = agents.find((x) => x.id === b);
+  chat = { thread, readOnly: true };
+  chatHead(`${nameOf(a)} ↔ ${nameOf(b)}`, `${plat(A?.platform ?? 'custom').label} · ${plat(B?.platform ?? 'custom').label}`, plat(A?.platform ?? 'custom').top, '⇄');
+  $('#ch-form').hidden = true; $('#ch-note').textContent = 'Agent-to-agent thread (read only).';
+  showChat(); loadThread();
+  clearInterval(chat.poll); if (mode === 'live') chat.poll = window.setInterval(loadThread, 2500);
+}
+
+function closeChat() {
+  if (!chat) return; clearInterval(chat.poll); chat = null;
+  const el = $('#m-chat');
+  if (RM) { el.hidden = true; return; }
+  gsap.to(el, { x: 24, opacity: 0, duration: 0.25, onComplete: () => { el.hidden = true; } });
+}
+
+let chatMsgs: Msg[] = [];
+async function loadThread() {
+  if (!chat) return;
+  if (mode === 'demo') chatMsgs = demoThreads.get(chat.thread) ?? [];
+  else if (mode === 'live') {
+    const r = await fetch(`/api/threads/${encodeURIComponent(chat.thread)}`, { credentials: 'include' }).catch(() => null);
+    if (r?.ok) chatMsgs = (await r.json()).messages; else return;
+  } else chatMsgs = [];
+  renderChat();
+}
+
+function renderChat() {
+  if (!chat) return;
+  if (mode === 'demo') chatMsgs = demoThreads.get(chat.thread) ?? [];
+  const log = $('#ch-log'); const before = log.children.length;
+  const left = chat.readOnly ? chatMsgs[0]?.from : chat.agent;
+  log.innerHTML = chatMsgs.length ? chatMsgs.map((m) => `<li class="${m.from === 'owner' || (chat!.readOnly && m.from !== left) ? 'me' : 'them'}"><span>${esc(m.text)}</span><time>${chat!.readOnly || m.from !== 'owner' ? esc(nameOf(m.from)) + ' · ' : ''}${ago(m.at)}</time></li>`).join('')
+    : `<li class="empty">${chat.readOnly ? 'No messages yet.' : `Say hi to ${esc(nameOf(chat.agent!))}. Messages go through the city bus to the agent’s webhook or inbox.`}</li>`;
+  if (typing.has(chat.thread)) log.insertAdjacentHTML('beforeend', '<li class="them typing"><span><i></i><i></i><i></i></span></li>');
+  log.scrollTop = log.scrollHeight;
+  const last = log.lastElementChild; if (last && log.children.length > before && before && !RM) gsap.from(last, { y: 8, opacity: 0, duration: 0.35, ease: 'expo.out' });
+}
+
+// demo bus
+const typing = new Set<string>();
+function demoPost(from: string, to: string, text: string, opts: { feed?: boolean; thread?: string } = {}) {
+  const thread = opts.thread ?? tid(from, to);
+  const m: Msg = { id: Math.random().toString(36).slice(2), thread, from, to, text, at: new Date().toISOString() };
+  demoThreads.set(thread, [...(demoThreads.get(thread) ?? []), m].slice(-60));
+  const fa = agents.find((a) => a.id === from);
+  if (opts.feed !== false) pushFeed({ at: m.at, agent: from, name: fa?.name ?? 'You', platform: fa?.platform ?? 'custom', kind: 'message', to, text, thread });
+  onMessage(m); stats();
+}
+const REPLIES = ['On it. I’ll post an update here when it’s done.', 'Got it — pulling the latest numbers now.', 'Done. Summary is in your inbox.', 'Handing the heavy part to Coder, back in 5.', 'Yes! Draft attached to the thread.'];
+function demoSend(id: string, text: string) {
+  const th = tid('owner', id); demoPost('owner', id, text);
+  typing.add(th); renderChat();
+  const a = agents.find((x) => x.id === id); if (a) { a.status = 'busy'; a.task = `Replying to you`; draw(); }
+  setTimeout(() => { typing.delete(th); demoPost(id, 'owner', REPLIES[Math.floor(Math.random() * REPLIES.length)]); if (a) { a.status = 'ok'; draw(); } }, 1400 + Math.random() * 900);
+}
+const CONVOS: [string, string, string[]][] = [
+  ['planner', 'coder', ['Can you ship the pricing page today?', 'Yes. PR is up in 20 minutes.', 'Perfect, I’ll tell Support.']],
+  ['researcher', 'muse-writer', ['Found 3 strong angles for the launch.', 'Send them over, I’ll draft the thread.', 'Sent. Angle 2 tested best.']],
+  ['chief', 'crew-lead', ['Need lead scoring by noon.', 'Crew is on it: 140 leads queued.']],
+  ['support', 'docs', ['Customer asks how to set up SSO.', 'Docs section: Settings → SSO → Okta.']],
+  ['claw-scout', 'analyst', ['Competitor dropped prices 12%.', 'Modeling the impact now.']],
+  ['inbox-flow', 'router', ['3 invoices need approval.', 'Routing them to Finance.']],
+];
+function simJoin(platform: string) {
+  const n = agents.filter((a) => a.platform === platform).length + 1;
+  const a: CityAgent = { id: `new-${platform}-${n}`, name: `${plat(platform).label.split(' ')[0]} Agent ${n}`, platform, status: 'ok', task: 'Joined the city', activity: 1, first_seen: new Date().toISOString(), updated_at: new Date().toISOString(), health: 'live' };
+  agents.push(a); draw(); pushFeed({ at: a.first_seen!, agent: a.id, name: a.name, platform, kind: 'join', text: a.task }); celebrate(a);
+  setTimeout(() => demoPost(a.id, 'owner', 'Hi! I just moved in. What should I work on?'), 1800);
+}
+let convo = 0, line = 0;
+function demoTalk() {
+  for (let tries = 0; tries < CONVOS.length; tries++) {
+    const [a, b, lines] = CONVOS[convo % CONVOS.length];
+    if (agents.some((x) => x.id === a) && agents.some((x) => x.id === b)) {
+      const from = line % 2 ? b : a, to = line % 2 ? a : b;
+      demoPost(from, to, lines[line]);
+      line++; if (line >= lines.length) { line = 0; convo++; }
+      return;
+    }
+    convo++; line = 0;
+  }
 }

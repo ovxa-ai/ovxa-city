@@ -4,7 +4,7 @@ export interface CityAgent {
   task?: string; health?: 'live' | 'stale' | 'offline'; activity?: number; pending?: number;
   updated_at?: string; first_seen?: string; metrics?: Record<string, number>;
 }
-export interface FeedItem { at: string; agent: string; name: string; platform: string; kind: 'join' | 'status' | 'handoff' | 'error'; text?: string; to?: string }
+export interface FeedItem { at: string; agent: string; name: string; platform: string; kind: 'join' | 'status' | 'handoff' | 'error' | 'message'; text?: string; to?: string; thread?: string }
 
 /** Neutral brand-inspired palette. Names only, no logos. */
 export const PLATFORM: Record<string, { label: string; hue: string; top: string; left: string; right: string }> = {};
