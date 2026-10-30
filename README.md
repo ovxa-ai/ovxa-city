@@ -6,7 +6,7 @@
 
 **Your AI bots, as a living city.** Every bot gets a building. Anything risky waits at Town Hall until you approve it.
 
-[Live demo (sample data)](#demo) · [5-minute setup](#5-minute-setup) · [Routine prompts](docs/ROUTINES.md) · ⭐ [Star OVXA](https://github.com/ovxa-ai)
+[Live demo (sample data)](#demo) · [60-second quickstart](#-60-second-quickstart) · [Routine prompts](docs/ROUTINES.md) · ⭐ [Star OVXA](https://github.com/ovxa-ai)
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/ovxa-ai/ovxa-city)
 
@@ -15,6 +15,20 @@
 ---
 
 <img src="docs/hero.gif" alt="Approving a request and switching to night" width="100%">
+
+## ⚡ 60-second quickstart
+
+**Option A, one click.** Press **Deploy to Cloudflare** above. Cloudflare copies the repo, creates the KV store, builds the app and deploys it. Set a password when it asks. You can leave `BOTS` as `{}` for now.
+
+**Option B, terminal (recommended).** This also generates your bot tokens:
+
+```bash
+git clone https://github.com/ovxa-ai/ovxa-city && cd ovxa-city
+npm install
+npm run setup        # asks for bot names → sets secrets → deploys → prints what to paste to each bot
+```
+
+Then paste the [bot prompt](#paste-this-to-your-bot) into each Grok Bot. That's the whole setup.
 
 ## What it is
 
@@ -31,39 +45,62 @@
 - A decision reaches a bot only if that bot has a routine webhook configured.
 - Without a backend, the page runs in **demo mode** with clearly labeled sample data.
 
-## 5-minute setup
+## Paste this to your bot
 
-You need Node 20+, a Cloudflare account and `npx wrangler login`.
+`npm run setup` prints a `CITY_URL`, `BOT_ID` and `BOT_TOKEN` for each bot. Send each Grok Bot this message with its own values filled in:
 
-```bash
-git clone https://github.com/ovxa-ai/ovxa-city && cd ovxa-city
-npm install
+```text
+Set up OVXA City reporting for yourself. Create two routines:
 
-# 1. storage
-npx wrangler kv namespace create CITY_KV     # paste the id into wrangler.toml
+1) "OVXA City status": scheduled every 15 minutes. It sends
+   POST {CITY_URL}/api/status
+   Header: Authorization: Bearer {BOT_TOKEN}
+   Body: {"status":"ok|busy|error|idle","message":"<one short line on what you're doing>",
+          "pending":[{"id":"<stable id>","title":"<action awaiting my approval, under 140 chars>",
+                      "detail":"<optional>","kind":"email|post|purchase|other","created_at":"<ISO time>"}]}
+   "pending" lists ONLY actions you're holding for my approval. Never put secrets, passwords,
+   message bodies or personal data in title/detail. Keep each id stable across pushes, and
+   remove an item once it's done. Save BOT_TOKEN as a secret, not in the prompt text.
 
-# 2. secrets (never committed)
-npx wrangler secret put OWNER_PASSWORD
-npx wrangler secret put SESSION_SECRET        # openssl rand -hex 32
-npx wrangler secret put BOTS                  # see below
+2) "OVXA City decisions": triggered by a webhook. On a request
+   {"request_id":"...","decision":"approve"|"decline"} that carries the correct webhook key,
+   find that held action. If approve: do exactly that action. If decline: drop it.
+   Ignore unknown ids or a wrong key. Then run the status routine once.
 
-# 3. ship
-npm run deploy
+When you're done, send me the webhook URL and the webhook key of routine 2, and tell me where
+in the routine settings I can copy them from. Don't run anything else.
+
+CITY_URL={CITY_URL}
+BOT_ID={BOT_ID}
+BOT_TOKEN={BOT_TOKEN}
 ```
 
-`BOTS` is a JSON object with one entry per bot:
+The bot replies with its webhook URL and key, which you copy from that routine's webhook trigger settings. Attach them like this:
+
+```bash
+npm run setup -- webhook <BOT_ID> <WEBHOOK_URL> <WEBHOOK_KEY>
+```
+
+Your decisions in Town Hall now reach that bot. More prompt variants are in [docs/ROUTINES.md](docs/ROUTINES.md).
+
+<details><summary>Manual setup (no script)</summary>
+
+```bash
+npm install && npm run deploy                 # KV namespace is auto-created (no id in wrangler.toml)
+npx wrangler secret put OWNER_PASSWORD
+npx wrangler secret put SESSION_SECRET        # openssl rand -hex 32
+npx wrangler secret put BOTS                  # JSON below
+```
 
 ```json
 {
   "chief":  { "name": "Chief of Staff", "role": "chief",  "token": "<random>", "webhook": "https://…", "webhookKey": "<from routine>" },
-  "grok":   { "name": "Grok Bot",       "role": "router", "token": "<random>", "webhook": "https://…", "webhookKey": "<from routine>" },
-  "growth": { "name": "Growth",         "role": "worker", "token": "<random>" }
+  "grok":   { "name": "Grok Bot",       "role": "router", "token": "<random>" }
 }
 ```
 
-Next, give each bot the two routines in **[docs/ROUTINES.md](docs/ROUTINES.md)**: a status push and a decision webhook. Open your city and sign in with `OWNER_PASSWORD`.
-
-**Prefer Cloudflare Access?** Protect the route with Access and set `ACCESS_EMAIL` in `wrangler.toml`. The Worker then trusts `cf-access-authenticated-user-email` for that address only.
+**Prefer Cloudflare Access?** Protect the route with Access and set `ACCESS_EMAIL` in `wrangler.toml`.
+</details>
 
 ## API
 

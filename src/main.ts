@@ -52,7 +52,7 @@ function shell() {
   </div>
 </header>
 ${demo ? `<section class="hero" aria-labelledby="hero-t"><h1 id="hero-t">${t('heroTitle')}</h1><p>${t('heroBody')}</p>
-  <div class="cta"><a class="btn primary" href="${GH}#5-minute-setup">${t('heroCta')}</a><a class="btn ghost" href="${GH}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m10 2.5 2.3 4.7 5.2.7-3.8 3.7.9 5.1L10 14.3l-4.6 2.4.9-5.1L2.5 7.9l5.2-.7z" fill="currentColor"/></svg>${t('heroStar')}</a></div></section>` : ''}
+  <div class="cta"><a class="btn primary" href="${GH}#-60-second-quickstart">${t('heroCta')}</a><a class="btn ghost" href="${GH}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m10 2.5 2.3 4.7 5.2.7-3.8 3.7.9 5.1L10 14.3l-4.6 2.4.9-5.1L2.5 7.9l5.2-.7z" fill="currentColor"/></svg>${t('heroStar')}</a></div></section>` : ''}
 <div id="stage" tabindex="-1"><div id="scene">
   <img id="imgD" src="/city-day.webp" alt="" width="1280" height="720" decoding="async">
   <img id="imgN" src="/city-night.webp" alt="" width="1280" height="720" decoding="async" loading="lazy">

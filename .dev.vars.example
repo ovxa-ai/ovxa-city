@@ -1,4 +1,3 @@
-# Copy to .dev.vars for `npm run worker:dev` (never commit .dev.vars)
-OWNER_PASSWORD=change-me
-SESSION_SECRET=generate-a-long-random-string
-BOTS={"grok":{"name":"Grok Bot","role":"router","token":"bot-token-1","webhook":"https://example.invalid/hook","webhookKey":"hook-key-1"}}
+OWNER_PASSWORD=change-me # password you'll use to sign in to Town Hall
+SESSION_SECRET=generate-a-long-random-string # any long random string, e.g. openssl rand -hex 32
+BOTS={} # JSON of your bots; leave {} and run `npm run setup -- bots` later, or see README

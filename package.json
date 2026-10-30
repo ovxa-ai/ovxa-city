@@ -12,7 +12,8 @@
     "test": "vitest run",
     "worker:dev": "wrangler dev",
     "deploy": "npm run build && wrangler deploy",
-    "typecheck": "tsc --noEmit && tsc -p worker --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p worker --noEmit",
+    "setup": "node scripts/setup.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250101.0",
@@ -20,6 +21,19 @@
     "typescript": "^5.6.3",
     "vite": "^5.4.10",
     "vitest": "^2.1.4",
-    "wrangler": "^3.90.0"
+    "wrangler": "^4.86.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "OWNER_PASSWORD": {
+        "description": "The password **you** will use to sign in to Town Hall and approve requests."
+      },
+      "SESSION_SECRET": {
+        "description": "Any long random string, for example from `openssl rand -hex 32`."
+      },
+      "BOTS": {
+        "description": "Your bots as JSON. Leave `{}` for now: the city opens empty, and you can add bots later with `npm run setup -- bots`. Format: `{\"chief\":{\"name\":\"Chief of Staff\",\"role\":\"chief\",\"token\":\"<random>\"}}`. See the [README](https://github.com/ovxa-ai/ovxa-city#paste-this-to-your-bot)."
+      }
+    }
   }
 }
