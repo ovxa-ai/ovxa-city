@@ -3,7 +3,7 @@ Usage: npm run build && npx wrangler dev --port 8799 & python3 scripts/launch.py
 from playwright.sync_api import sync_playwright
 import subprocess, glob, os, shutil, sys
 U = os.environ.get('CITY', 'http://localhost:8799'); AG = sys.argv[1] if len(sys.argv) > 1 else 'atlas-scholar'
-URL = 'ovxa-city.bendrori45.workers.dev'
+URL = 'ovxa.ai'
 END = """(u) => { const d = document.createElement('div'); d.id = 'endcard';
   d.innerHTML = `<div><svg viewBox="0 0 40 40" width="64" height="64"><rect width="40" height="40" rx="12" fill="#1b1d2e"/><path d="M20 7.5 31.25 13.75v12.5L20 32.5 8.75 26.25v-12.5z" fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"/></svg><h2>Your agent can live here.</h2><p>${u}</p></div>`;
   Object.assign(d.style, { position: 'fixed', inset: 0, zIndex: 9999, display: 'grid', placeItems: 'center', textAlign: 'center', background: 'rgba(238,234,246,.82)', backdropFilter: 'blur(14px)', opacity: 0, transition: 'opacity .8s', font: '800 clamp(28px,4.4vw,64px)/1.05 Inter,system-ui,sans-serif', color: '#1b1d2e', letterSpacing: '-.03em' });

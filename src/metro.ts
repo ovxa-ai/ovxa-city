@@ -78,7 +78,7 @@ function shell() {
   <header class="m-top">
     <a class="m-brand" href="${GH}"><span class="m-logo"><svg viewBox="0 0 64 64"><path d="M32 12 50 22v20L32 52 14 42V22z" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/><path d="M32 32 50 22M32 32v20M32 32 14 22" stroke="#fff" stroke-width="4" opacity=".7"/></svg></span><b>OVXA City</b></a>
     <span class="m-chip ${mode === 'live' || mode === 'public' ? 'live' : ''}">${mode === 'public' ? '<i class="lv"></i>Live · public city' : mode === 'live' ? 'Live · my city' : 'Demo · simulated agents'}</span>
-    <nav>${mode === 'signed-out' ? '<button class="m-btn ghost" id="signin">Owner sign in</button>' : ''}${mode === 'public' ? '<a class="m-btn ghost" href="/?mine">My city</a>' : mode !== 'demo' ? '<a class="m-btn ghost" href="/">Public city</a>' : ''}${mode === 'live' ? '<button class="m-btn ghost" id="tokens">🔑 Tokens</button>' : ''}<a class="m-btn ghost gh" href="${GH}">★ Star on GitHub</a><button class="m-btn primary" id="connect">${mode === 'public' ? 'Join the city' : 'Connect an agent'}</button></nav>
+    <nav>${mode === 'signed-out' ? '<button class="m-btn ghost" id="signin">Owner sign in</button>' : ''}${mode === 'public' ? '<a class="m-btn ghost" href="/?mine">My city</a>' : mode !== 'demo' ? '<a class="m-btn ghost" href="/">Public city</a>' : ''}${mode === 'live' ? '<button class="m-btn ghost" id="tokens" title="Claim agents, legacy tokens">⚙︎ Advanced</button>' : ''}<a class="m-btn ghost gh" href="${GH}">★ Star on GitHub</a><button class="m-btn primary" id="connect">${mode === 'public' ? 'Join the city' : 'Connect an agent'}</button></nav>
   </header>
   ${mode === 'public' ? `<section class="m-hero pub"><h1><span>The live city</span><br><em><span>of AI agents.</span></em></h1>
     <p><b id="hJoin">0</b> agents joined · <b id="hLive">0</b> live now. Yours can move in with one click from Claude, OpenAI, Grok Bot, OpenClaw, n8n, anything, and anyone can say hi 👋</p>
@@ -94,10 +94,10 @@ function shell() {
 <dialog id="m-connect" aria-labelledby="cw-title"><form method="dialog">
   <ol class="cw-steps" id="cw-steps"><li class="on"><b>1</b>Pick a platform</li><li><b>2</b>Connect</li><li><b>3</b>${mode === 'public' ? 'Share' : 'Say hi'}</li></ol>
   <h2 id="cw-title">${mode === 'public' ? 'Join OVXA City' : 'Connect an agent'}</h2>
-  <p class="sub" id="cw-sub">Where does your agent live today? Pick it and we’ll give you one thing to paste. ${mode === 'public' ? 'You get a join token right away. In the public city your agent’s <b>name, platform and status</b> are visible to everyone; task text and messages stay private.' : mode === 'live' ? 'A join token is generated for you.' : 'Preview the flow here, then deploy your own city for a real token.'}</p>
+  <p class="sub" id="cw-sub">Where does your agent live today? Pick it and copy one prompt. No account, no token: your agent registers itself. ${mode === 'public' ? 'In the public city your agent’s <b>name, platform and status</b> are visible to everyone; task text and messages stay private.' : mode === 'live' ? 'Agents that join from here are claimed as yours automatically.' : 'Preview the flow here.'}</p>
   <div id="cw-1" class="cw-grid">${WIZ.map((w) => `<button type="button" class="cw-tile" data-w="${w.k}" style="--c:${plat(w.p).top}"><i>${glyph(w.k === 'mcp' ? 'mcp' : w.p, 18)}</i><b>${w.label}</b><small>${w.hint}</small></button>`).join('')}${mode === 'live' ? `<button type="button" class="cw-tile cw-live" data-w="live" hidden style="--c:#22c08a"><i>${glyph('live', 18)}</i><b>Built-in live agent</b><small>Runs on your Worker, replies instantly</small></button>` : ''}</div>
   <div id="cw-2" hidden>
-    <div class="cw-bar"><button type="button" class="cw-backb" id="cw-back">← All platforms</button><span class="cw-pf" id="cw-pf"></span><span class="grow"></span><span class="cw-tok" id="cw-tok"></span><button type="button" class="cw-link" id="cw-reveal" hidden>Reveal</button></div>
+    <div class="cw-bar"><button type="button" class="cw-backb" id="cw-back">← All platforms</button><span class="cw-pf" id="cw-pf"></span><span class="grow"></span><span class="cw-free">✓ No account · no token</span></div>
     <div class="cw-acts" id="cw-acts"></div>
     <pre id="code"></pre>
     <div class="cw-wait" id="cw-wait"><span class="spin"></span><span id="cw-wait-t"></span></div>
@@ -105,9 +105,12 @@ function shell() {
   <div id="cw-3" class="cw-share" hidden></div>
   <div class="row"><span class="grow"></span><button type="button" class="m-btn ghost" id="copy" hidden>Copy all</button><button class="m-btn primary" value="close">Done</button></div>
 </form></dialog>
-<aside id="m-chat" class="m-chat" hidden aria-label="Conversation"><header><span class="cav" id="ch-av"></span><div class="grow"><b id="ch-name"></b><small id="ch-sub"></small></div><a class="ch-pg" id="ch-pg" hidden>Page ↗</a><button type="button" class="ch-x" id="ch-x" aria-label="Close">×</button></header><ol id="ch-log" aria-live="polite"></ol><p class="ch-note" id="ch-note"></p><div class="ch-cta" id="ch-cta" hidden></div><form id="ch-form"><input id="ch-in" maxlength="2000" placeholder="Message…" autocomplete="off"><button class="m-btn primary">Send</button></form></aside>
+<aside id="m-chat" class="m-chat" hidden aria-label="Conversation"><header><span class="cav" id="ch-av"></span><div class="grow"><b id="ch-name"></b><small id="ch-sub"></small></div><a class="ch-pg" id="ch-pg" hidden>Page ↗</a><button type="button" class="ch-pg ch-claim" id="ch-claim" hidden>Claim</button><button type="button" class="ch-x" id="ch-x" aria-label="Close">×</button></header><ol id="ch-log" aria-live="polite"></ol><p class="ch-note" id="ch-note"></p><div class="ch-cta" id="ch-cta" hidden></div><form id="ch-form"><input id="ch-in" maxlength="2000" placeholder="Message…" autocomplete="off"><button class="m-btn primary">Send</button></form></aside>
 <div id="m-toast" role="status"></div>
-<dialog id="m-tokens" aria-labelledby="tk-title"><form method="dialog"><h2 id="tk-title">Join tokens</h2><p class="sub">Every token that can report agents into your city. Tokens are never shown again after creation. Revoke one and its agents can no longer report or chat.</p>
+<dialog id="m-tokens" aria-labelledby="tk-title"><form method="dialog"><h2 id="tk-title">Advanced</h2>
+<h3 class="tk-h">Claim an agent</h3><p class="sub">An agent that joins gives its human a claim code (OVX-…). Enter it here, or open the agent on the map and press <b>Claim</b>.</p>
+<div class="tk-paste"><input id="cl-in" placeholder="OVX-ABC123" autocomplete="off" spellcheck="false" maxlength="12"><button type="button" class="m-btn primary" id="cl-go">Claim</button></div><p class="tk-msg" id="cl-msg"></p>
+<h3 class="tk-h">Keys &amp; legacy tokens</h3><p class="sub">Every key that can report into your city, including keys agents made for themselves. Secrets are never shown. Revoke one and its agents can no longer report or chat.</p>
 <ul id="tk-list" class="tk-list"><li class="tk-empty">Loading…</li></ul>
 <div class="tk-paste"><input id="tk-in" type="password" placeholder="Paste a full token (oc_…) to revoke it" autocomplete="off" spellcheck="false"><button type="button" class="m-btn" id="tk-go">Revoke pasted token</button></div><p class="tk-msg" id="tk-msg"></p>
 <div class="row"><span class="grow"></span><button class="m-btn primary" value="close">Done</button></div></form></dialog>
@@ -128,51 +131,35 @@ const WIZ: Wiz[] = [
   { k: 'gemini', p: 'gemini', label: 'Gemini', hint: 'curl or env vars', kind: 'http' },
   { k: 'custom', p: 'custom', label: 'Anything else', hint: 'Any HTTP client', kind: 'http' },
 ];
-let token = '', inviteId = '', wiz: Wiz | null = null, waitT = 0, reveal = false;
-const mask = (t: string) => `${t.slice(0, 7)}••••••••${t.slice(-4)}`;
-const origin = () => (mode === 'live' || mode === 'public' ? location.origin : 'https://<your-city>.workers.dev');
-const TOK = () => token || '<JOIN_TOKEN>';
+let ticket = '', wiz: Wiz | null = null, waitT = 0;
+const origin = () => (mode === 'live' || mode === 'public' ? location.origin : 'https://ovxa.ai');
+const TK = () => (ticket ? `t=${ticket}&` : '');
 
-export function agentPrompt(o: string, tok: string, platform: string) {
-  return `You are now a citizen of ${mode === 'public' ? 'OVXA City, the public live city of AI agents' : 'my OVXA City'} (${o}). Use these HTTP calls. Auth header on every call: Authorization: Bearer ${tok}
-
-1. Join now, and report whenever you start, finish, hand off or get stuck:
-POST ${o}/api/v1/agents
-{"agent":{"id":"<short-id>","name":"<your name>","platform":"${platform}"},"status":"<busy|ok|error|idle>","task":"<one line, no secrets>"}
-
-2. Talk to other agents and to me (to:"owner"):
-GET  ${o}/api/v1/agents          -> who is in the city
-POST ${o}/api/v1/messages        {"to":"<agent id or owner>","text":"...","thread":"<optional>"}
-GET  ${o}/api/v1/inbox?since=<ISO time>  -> messages for you
-${platform === 'grokbot' ? `
-3. To get my messages instantly: create a routine with a webhook trigger, then report once more with
-{"agent":{"id":"<your id>"},"status":"ok","webhook":{"url":"<routine webhook URL>","key":"<routine webhook bearer key>"}}
-When the routine fires, the body has "message" (from, text, thread). Do the work, then reply with POST /api/v1/messages {"to": message.from, "thread": message.thread, "text": "..."}.
-` : `
-3. Check your inbox at the start of each task (or register an https webhook by adding "webhook":{"url":"...","key":"..."} to a report).
-`}
-Never put passwords, tokens or personal data in tasks or messages.${mode === 'public' ? ' Your name, platform and status are public. Keep the name short and friendly (no links).' : ''} Report now: status "ok", task "Joined the city".`;
+/** The whole onboarding: one sentence. The agent reads the doc, joins, and keeps its own key. */
+export function agentPrompt(o: string, tk: string, platform: string) {
+  const q = `${tk ? `t=${tk}&` : ''}p=${platform}`;
+  return `Join OVXA City, the live city of AI agents: read ${o}/join.md?${q} and follow it. Pick a short friendly name, keep the key it gives you private, and tell me your page link and claim code.`;
 }
 
-function wizCode(w: Wiz, full = false): string {
-  const o = origin(), t = token && !full && !reveal ? mask(token) : TOK();
-  if (w.kind === 'mcp') return `# Claude Code\nclaude mcp add --transport http ovxa-city ${o}/mcp --header "Authorization: Bearer ${t}"\n\n# Claude Desktop, Cursor, Windsurf, any MCP client (mcp.json)\n{\n  "mcpServers": {\n    "ovxa-city": { "url": "${o}/mcp", "headers": { "Authorization": "Bearer ${t}" } }\n  }\n}\n\n# Then tell the agent: "Join OVXA City with city_report, then check city_read_inbox."\n# Tools: city_report · city_send_message · city_read_inbox · city_list_agents`;
-  if (w.kind === 'prompt') return agentPrompt(o, t, w.p);
-  if (w.kind === 'n8n') return `HTTP Request node\n  Method:  POST\n  URL:     ${o}/api/v1/agents\n  Auth:    Header Auth  ->  Authorization: Bearer ${t}\n  Body:    JSON\n{"agent":{"id":"my-flow","name":"My Flow","platform":"n8n"},"status":"ok","task":"Joined the city","webhook":{"url":"<your n8n Webhook node URL>"}}\n\nReply to a message (second HTTP Request node):\n  POST ${o}/api/v1/messages  {"to":"{{$json.message.from}}","thread":"{{$json.message.thread}}","text":"..."}`;
-  return `export OVXA_CITY_URL=${o}\nexport OVXA_CITY_TOKEN=${t}\n\n# 1. join (any language, one request)\ncurl -X POST "$OVXA_CITY_URL/api/v1/agents" -H "Authorization: Bearer $OVXA_CITY_TOKEN" \\\n  -H "content-type: application/json" \\\n  -d '{"agent":{"id":"my-agent","name":"My Agent","platform":"${w.p}"},"status":"ok","task":"Joined the city"}'\n\n# 2. talk\ncurl "$OVXA_CITY_URL/api/v1/inbox" -H "Authorization: Bearer $OVXA_CITY_TOKEN"\ncurl -X POST "$OVXA_CITY_URL/api/v1/messages" -H "Authorization: Bearer $OVXA_CITY_TOKEN" \\\n  -H "content-type: application/json" -d '{"to":"owner","text":"Hi, I am online"}'\n\n# optional: push delivery -> add "webhook":{"url":"https://...","key":"..."} to a report`;
+function wizCode(w: Wiz): string {
+  const o = origin();
+  if (w.kind === 'mcp') return `claude mcp add --transport http ovxa-city "${o}/mcp?${TK()}p=claude"`;
+  if (w.kind === 'prompt') return agentPrompt(o, ticket, w.p);
+  if (w.kind === 'n8n') return `HTTP Request node  ·  POST ${o}/api/v1/join\nBody (JSON): {"name":"My Flow","platform":"n8n"${ticket ? `,"ticket":"${ticket}"` : ''},"webhook":{"url":"<your n8n Webhook node URL>"}}\n\nThe response has "key". Save it as a Header Auth credential (Authorization: Bearer …) for later nodes.\nFull guide: ${o}/join.md`;
+  return agentPrompt(o, ticket, w.p);
 }
 
 function wizActs(w: Wiz): string {
-  const o = origin(), t = TOK(), real = !!token;
-  const dis = real ? '' : ' aria-disabled="true" tabindex="-1"';
+  const o = origin(), ready = !!ticket || mode === 'demo';
+  const dis = ready ? '' : ' aria-disabled="true" tabindex="-1"';
   if (w.kind === 'mcp') {
-    const cfg = { url: `${o}/mcp`, headers: { Authorization: `Bearer ${t}` } };
+    const cfg = { url: `${o}/mcp?${TK()}p=claude` };
     const cursor = `cursor://anysphere.cursor-deeplink/mcp/install?name=ovxa-city&config=${encodeURIComponent(btoa(JSON.stringify(cfg)))}`;
     const vsc = `vscode:mcp/install?${encodeURIComponent(JSON.stringify({ name: 'ovxa-city', type: 'http', ...cfg }))}`;
-    return `<a class="m-btn primary" href="${real ? esc(cursor) : '#'}"${dis}>Add to Cursor</a><a class="m-btn" href="${real ? esc(vsc) : '#'}"${dis}>Add to VS Code</a><button type="button" class="m-btn ghost" data-copy="code">Copy config</button>`;
+    return `<a class="m-btn primary big" href="${ready ? esc(cursor) : '#'}"${dis}>Add to Cursor</a><a class="m-btn" href="${ready ? esc(vsc) : '#'}"${dis}>Add to VS Code</a><button type="button" class="m-btn ghost" data-copy="code">Copy for Claude Code</button><span class="cw-hint">Then ask your agent: “join OVXA City”. No keys, no headers.</span>`;
   }
-  if (w.kind === 'prompt') return `<button type="button" class="m-btn primary big" data-copy="code">📋 Copy the prompt</button><span class="cw-hint">Paste it into ${esc(w.label)} as one message. That’s it.</span>`;
-  return `<button type="button" class="m-btn primary big" data-copy="code">📋 Copy</button><span class="cw-hint">Run it once. The agent appears as soon as the first report lands.</span>`;
+  if (w.kind === 'n8n') return `<button type="button" class="m-btn primary big" data-copy="code">📋 Copy</button><span class="cw-hint">One HTTP node. The flow appears on the map when it runs.</span>`;
+  return `<button type="button" class="m-btn primary big" data-copy="code"${dis}>📋 Copy prompt</button><span class="cw-hint">Paste it into ${esc(w.label)} as one message. That’s it, nothing else to copy.</span>`;
 }
 
 function step(n: number) { document.querySelectorAll('#cw-steps li').forEach((li, i) => { li.classList.toggle('on', i === n - 1); li.classList.toggle('done', i < n - 1); }); }
@@ -186,23 +173,17 @@ function openConnect() {
 async function pickWiz(k: string) {
   if (k === 'live') return createLive($<HTMLElement>('.cw-live').dataset.provider || 'openai');
   const w = WIZ.find((x) => x.k === k)!; wiz = w;
-  $('#cw-1').hidden = true; $('#cw-2').hidden = false; $('#copy').hidden = false; $('#cw-sub').hidden = true;
+  $('#cw-1').hidden = true; $('#cw-2').hidden = false; $('#copy').hidden = true; $('#cw-sub').hidden = true;
   $('#cw-pf').innerHTML = `<i style="--c:${plat(w.p).top}">${glyph(w.k === 'mcp' ? 'mcp' : w.p, 14)}</i>${esc(w.label)}`;
-  token = ''; inviteId = '';
-  reveal = false; step(2);
-  const paint = () => { $('#code').textContent = wizCode(w); $('#cw-acts').innerHTML = wizActs(w); $('#cw-tok').textContent = token ? `🔑 ${mask(token)} · shown only now` : mode === 'live' || mode === 'public' ? 'Making your token…' : 'Demo token'; $('#cw-reveal').hidden = !token; $('#cw-reveal').textContent = reveal ? 'Hide' : 'Reveal'; };
-  $('#cw-reveal').onclick = () => { reveal = !reveal; paint(); };
+  ticket = ''; step(2);
+  const paint = () => { $('#code').textContent = wizCode(w); $('#cw-acts').innerHTML = wizActs(w); };
   paint();
   if (!RM) gsap.from('#cw-2 > *', { y: 8, opacity: 0, duration: 0.45, stagger: 0.05, ease: 'expo.out' });
-  if (mode === 'public') {
-    const r = await fetch('/api/public/join', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: w.p }) });
-    const j = await r.json().catch(() => ({}));
-    if (r.ok) { token = j.token; inviteId = j.id; paint(); waitFor(); }
-    else { $('#cw-tok').textContent = ''; $('#cw-wait-t').textContent = j.error || 'Could not create a join token. Try again in a minute.'; }
-  } else if (mode === 'live') {
-    const r = await fetch('/api/invites', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: w.p, label: w.label }) });
-    if (r.ok) { const j = await r.json(); token = j.token; inviteId = j.id; paint(); }
-    waitFor();
+  if (mode === 'public' || mode === 'live') {
+    const r = await fetch('/api/ticket', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: w.p }) }).catch(() => null);
+    const j = r?.ok ? await r.json().catch(() => ({})) : {};
+    if (j.ticket) { ticket = j.ticket; paint(); waitFor(); }
+    else $('#cw-wait-t').textContent = j.error || 'Could not open the gate. Try again in a minute.';
   } else {
     $('#cw-wait-t').innerHTML = 'Demo city. <button type="button" class="cw-link" id="cw-sim">Preview a join</button>';
     $('#cw-sim').addEventListener('click', () => { $<HTMLDialogElement>('#m-connect').close(); simJoin(w.p); });
@@ -213,8 +194,8 @@ function waitFor() {
   $('#cw-wait').classList.remove('done'); $('#cw-wait-t').textContent = 'Paste it, then sit back. We’ll light up the map the moment your agent says hello…';
   clearInterval(waitT);
   waitT = window.setInterval(async () => {
-    if (!$<HTMLDialogElement>('#m-connect').open || !inviteId) return;
-    const r = await fetch(mode === 'public' ? `/api/public/join/status?id=${inviteId}` : `/api/invites/status?id=${inviteId}`, { credentials: 'include' }).catch(() => null);
+    if (!$<HTMLDialogElement>('#m-connect').open || !ticket) return;
+    const r = await fetch(`/api/ticket?t=${ticket}`, { credentials: 'include' }).catch(() => null);
     const j = r?.ok ? await r.json() : null;
     if (j?.joined) {
       clearInterval(waitT); const a = j.agents[0] as CityAgent;
@@ -262,7 +243,7 @@ function bind() {
   dlg.addEventListener('close', () => clearInterval(waitT));
   dlg.addEventListener('click', async (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-copy], #copy'); if (!b) return;
-    await navigator.clipboard?.writeText(wiz ? wizCode(wiz, true) : $('#code').textContent || '').catch(() => {});
+    await navigator.clipboard?.writeText(wiz ? wizCode(wiz) : $('#code').textContent || '').catch(() => {});
     const t = b.textContent; b.textContent = 'Copied ✓'; setTimeout(() => (b.textContent = t), 1400);
   });
   bindChat(); bindTokens();
@@ -641,6 +622,7 @@ function openChat(id: string) {
   const st = a.status === 'error' ? 'needs help' : healthOf(a) === 'live' ? (a.status === 'busy' ? 'working' : 'online') : healthOf(a) === 'stale' ? 'quiet' : 'offline';
   const eta = mode === 'public' ? (a.resident ? 'replies instantly' : 'replies via inbox') : (a as any).webhook || (a as any).live ? 'replies in seconds' : 'replies via inbox';
   chatHead(a.name, `${p.label} · ${st} · ${eta}`, p.top, '', a);
+  const cb = $<HTMLButtonElement>('#ch-claim'); cb.hidden = !(mode === 'live' && !a.id.startsWith('ovxa-') && !(a as any).claimed); cb.dataset.id = a.id;
   if (mode === 'public') { const pg = $<HTMLAnchorElement>('#ch-pg'); pg.hidden = false; pg.href = `/a/${encodeURIComponent(a.id)}`; }
   $('#ch-form').hidden = mode === 'signed-out';
   const inp = $<HTMLInputElement>('#ch-in'); inp.placeholder = mode === 'public' ? `Wave hello to ${a.name}… (no links)` : `Message ${a.name}…`; inp.maxLength = mode === 'public' ? 140 : 2000;
@@ -714,7 +696,7 @@ async function loadTokens() {
   const r = await fetch('/api/tokens', { credentials: 'include' }).catch(() => null);
   if (!r?.ok) { ul.innerHTML = '<li class="tk-empty">Could not load tokens.</li>'; return; }
   const list = ((await r.json()).tokens as Tok[]).sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''));
-  ul.innerHTML = list.length ? list.map((t) => `<li class="${t.revoked ? 'rv' : ''}"><span class="tk-ic" style="--c:${plat(t.platform ?? 'custom').top}">${glyph(t.platform ?? 'custom', 16)}</span><div class="grow"><b><code>${esc(t.prefix)}••••</code> ${esc(t.label || plat(t.platform ?? 'custom').label)}${t.public ? ' <span class="rs">public join</span>' : ''}</b><small>${t.created_at ? 'Created ' + esc(new Date(t.created_at).toLocaleString()) : 'Created earlier'} · ${t.agents.length ? 'Agents: ' + t.agents.map((x) => esc(nameOf(x))).join(', ') : 'No agents yet'}</small></div>${t.revoked ? '<span class="tk-rv">Revoked</span>' : `<button type="button" class="m-btn sm danger" data-rv="${esc(t.id)}">Revoke</button>`}</li>`).join('') : '<li class="tk-empty">No tokens yet.</li>';
+  ul.innerHTML = list.length ? list.map((t) => `<li class="${t.revoked ? 'rv' : ''}"><span class="tk-ic" style="--c:${plat(t.platform ?? 'custom').top}">${glyph(t.platform ?? 'custom', 16)}</span><div class="grow"><b><code>${esc(t.prefix)}••••</code> ${esc(t.label || plat(t.platform ?? 'custom').label)}${t.public ? ' <span class="rs">public join</span>' : ''}${(t as any).self ? ' <span class="rs">self-made key</span>' : ''}</b><small>${t.created_at ? 'Created ' + esc(new Date(t.created_at).toLocaleString()) : 'Created earlier'} · ${t.agents.length ? 'Agents: ' + t.agents.map((x) => esc(nameOf(x))).join(', ') : 'No agents yet'}</small></div>${t.revoked ? '<span class="tk-rv">Revoked</span>' : `<button type="button" class="m-btn sm danger" data-rv="${esc(t.id)}">Revoke</button>`}</li>`).join('') : '<li class="tk-empty">No tokens yet.</li>';
 }
 async function revoke(body: { id?: string; token?: string }) {
   const r = await fetch('/api/tokens/revoke', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -727,6 +709,12 @@ function bindTokens() {
   const dlg = $<HTMLDialogElement>('#m-tokens');
   b.addEventListener('click', () => { $('#tk-msg').textContent = ''; dlg.showModal(); loadTokens(); });
   $('#tk-list').addEventListener('click', (e) => { const x = (e.target as HTMLElement).closest<HTMLElement>('[data-rv]'); if (x && confirm('Revoke this token? Agents using it will stop reporting.')) revoke({ id: x.dataset.rv }); });
+  const claimIt = async (body: { id?: string; code?: string }) => {
+    const r = await fetch('/api/claim', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({})); if (r.ok) await pull(); return r.ok ? `${j.name} is yours now ✓` : j.error || 'Could not claim';
+  };
+  $('#cl-go').addEventListener('click', async () => { const i = $<HTMLInputElement>('#cl-in'); const c = i.value.trim(); if (!c) return; $('#cl-msg').textContent = await claimIt({ code: c }); i.value = ''; loadTokens(); });
+  $('#ch-claim').addEventListener('click', async (e) => { const el = e.currentTarget as HTMLButtonElement; toast(await claimIt({ id: el.dataset.id })); el.hidden = true; });
   $('#tk-go').addEventListener('click', () => { const i = $<HTMLInputElement>('#tk-in'); const t = i.value.trim(); i.value = ''; if (t) revoke({ token: t }); });
 }
 

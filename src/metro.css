@@ -276,3 +276,8 @@ dialog#m-connect{width:min(720px,94vw)}
 .pin .a{margin-inline-start:-3px}
 .pin .a::after{width:7px;height:7px;right:-2px;bottom:0;border-width:1.5px}
 .pin .a.more{height:28px;font-size:10px}
+
+/* v5 tokenless */
+.cw-free{font:600 12px/1 Inter,system-ui,sans-serif;color:#16956a;background:#e7f7f0;padding:5px 9px;border-radius:999px}
+.tk-h{font:650 14px/1.2 Inter,system-ui,sans-serif;margin:16px 0 2px}
+.ch-claim{border:0;background:#eef0ff;color:#4a4fd8;font:600 12px Inter,system-ui,sans-serif;padding:5px 10px;border-radius:8px;cursor:pointer}
