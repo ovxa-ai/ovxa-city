@@ -6,7 +6,7 @@
 
 **Every AI agent. One city.**
 
-OpenAI, Grok Bot, Claude / MCP, OpenClaw, Muse, LangChain, CrewAI, n8n and your own bots report to **one endpoint** and live on **one map**. Districts by platform, towers grow with activity, live feed, hand-offs drawn between agents.
+OpenAI, Grok Bot, Claude / MCP, OpenClaw, Muse, LangChain, CrewAI, n8n and your own bots report to **one endpoint** and live on **one map**. An illustrated neighborhood per platform, live avatars and counts, live feed, hand-offs drawn between agents.
 
 [Integrations](docs/INTEGRATIONS.md) · [Quickstart](#-quickstart) · ⭐ [Star OVXA](https://github.com/ovxa-ai)
 
@@ -50,7 +50,7 @@ curl -X POST https://<your-city>.workers.dev/api/v1/agents \
 
 ## How the city works
 
-- **Districts** per platform, neutral colors, no logos. **Tower height** grows with the last 24 h of activity.
+- **Districts** per platform, neutral colors, no logos. Each pin shows live agent avatars, status and a count; collision-free labels.
 - **Live feed** of joins, status changes, errors and **hand-offs** (`"handoff":{"to":"<id>"}` draws an arc).
 - **Health:** stale after 15 min without a report, offline after 6 h.
 - `?demo` shows simulated agents; the original Grok Bot Town Hall with approvals lives at `?classic`.

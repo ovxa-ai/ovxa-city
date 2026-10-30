@@ -1,6 +1,6 @@
 import { gsap } from 'gsap';
 import './metro.css';
-import { layoutCity, plat, PLATFORM, healthOf, type CityAgent, type FeedItem, type District } from './layout';
+import { plat, PLATFORM, healthOf, type CityAgent, type FeedItem } from './layout';
 import { SIM_ROSTER, simTask } from './sim';
 
 const GH = 'https://github.com/ovxa-ai/ovxa-city';
@@ -8,17 +8,12 @@ const NS = 'http://www.w3.org/2000/svg';
 const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const $ = <T extends Element = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 const esc = (s = '') => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-const P = 6.2, LOT = 1.25, S = 0.46, TW = 40, TH = 20;
-const iso = (x: number, y: number): [number, number] => [(x - y) * TW, (x + y) * TH];
-const pt = (p: [number, number], dy = 0) => `${p[0].toFixed(1)},${(p[1] - dy).toFixed(1)}`;
 
 type Mode = 'demo' | 'signed-out' | 'live';
 let mode: Mode = 'demo';
 let agents: CityAgent[] = [];
 let feed: FeedItem[] = [];
-const drawn = new Map<string, { g: SVGGElement; h: { v: number }; cx: number; cy: number; target: number }>();
 let handoffs = 0;
-const view = { x: -400, y: -260, w: 800, h: 520 };
 
 function svg<K extends keyof SVGElementTagNameMap>(tag: K, a: Record<string, string | number>, parent?: Element) {
   const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); parent?.appendChild(e); return e;
@@ -31,7 +26,7 @@ export async function start() {
   $('#app').innerHTML = shell();
   bind();
   if (mode === 'live') { await pull(); setInterval(pull, 10_000); } else simulate();
-  gsap.ticker.add(tickCamera);
+  fitStage();
   if (!RM) gsap.from('.m-ui > *', { y: 12, opacity: 0, duration: 0.9, stagger: 0.07, ease: 'expo.out', delay: 0.2 });
 }
 
@@ -47,11 +42,13 @@ async function detect(): Promise<Mode> {
 function shell() {
   const legend = Object.entries(PLATFORM).map(([k, p]) => `<li data-p="${k}"><i style="--c:${p.top}"></i>${p.label}</li>`).join('');
   return `
-<svg id="city" role="img" aria-label="Isometric city of AI agents"><defs>
-  <radialGradient id="bgG" cx="50%" cy="40%" r="75%"><stop offset="0" stop-color="#18203f"/><stop offset="1" stop-color="#070914"/></radialGradient>
-  <filter id="glow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="3"/></filter>
-  <linearGradient id="shade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".18"/><stop offset="1" stop-color="#000" stop-opacity=".12"/></linearGradient>
-</defs><g id="ground"></g><g id="plates"></g><g id="blds"></g><g id="arcs"></g><g id="labels"></g></svg>
+<div class="m-sky"></div>
+<div id="stage" role="img" aria-label="Illustrated isometric city with one neighborhood per AI platform">
+  <img src="/metro-day.webp" alt="" draggable="false" fetchpriority="high">
+  <svg id="fx" viewBox="0 0 1280 720" preserveAspectRatio="none" aria-hidden="true"><defs><filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4"/></filter></defs></svg>
+  <div id="pins"></div>
+</div>
+<div id="m-empty" hidden><b>Your city is ready for its first agent</b><p>Send one request from any platform and it moves into its neighborhood.</p><button class="m-btn primary" data-open-connect>Connect an agent</button></div>
 <div class="m-ui">
   <header class="m-top">
     <a class="m-brand" href="${GH}"><span class="m-logo"><svg viewBox="0 0 64 64"><path d="M32 12 50 22v20L32 52 14 42V22z" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/><path d="M32 32 50 22M32 32v20M32 32 14 22" stroke="#fff" stroke-width="4" opacity=".7"/></svg></span><b>OVXA City</b></a>
@@ -59,9 +56,10 @@ function shell() {
     <nav>${mode === 'signed-out' ? '<button class="m-btn ghost" id="signin">Owner sign in</button>' : ''}<a class="m-btn ghost" href="${GH}">★ Star on GitHub</a><button class="m-btn primary" id="connect">Connect an agent</button></nav>
   </header>
   <section class="m-hero"><h1>Every AI agent.<br><em>One city.</em></h1>
-    <p>OpenAI, Grok Bot, Claude, OpenClaw, Muse, LangChain, CrewAI, n8n — one endpoint, one living map. Districts by platform, towers by activity, live handoffs.</p>
-    <div class="m-stats"><div><b id="sAg">0</b><span>agents</span></div><div><b id="sPl">0</b><span>platforms</span></div><div><b id="sLv">0</b><span>live now</span></div><div><b id="sHo">0</b><span>handoffs</span></div></div>
+    <p>OpenAI, Grok Bot, Claude, OpenClaw, Muse, LangChain, CrewAI, n8n — one endpoint, one living map. One neighborhood per platform, live status and handoffs.</p>
+
   </section>
+<div class="m-stats"><div><b id="sAg">0</b><span>agents</span></div><div><b id="sPl">0</b><span>platforms</span></div><div><b id="sLv">0</b><span>live now</span></div><div><b id="sHo">0</b><span>handoffs</span></div></div>
   <aside class="m-feed" aria-label="Live activity"><h2><span class="dot"></span>Live activity</h2><ol id="feed" aria-live="polite"></ol></aside>
   <ul class="m-legend" aria-label="Platforms">${legend}</ul>
 </div>
@@ -110,7 +108,8 @@ function bind() {
     const r = await fetch('/api/login', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: pw }) });
     if (r.ok) location.reload(); else (lg.querySelector('.err') as HTMLElement).hidden = false;
   });
-  addEventListener('resize', () => fitCamera(true));
+  addEventListener('resize', fitStage);
+  document.querySelector('[data-open-connect]')?.addEventListener('click', () => { paint(); dlg.showModal(); });
 }
 
 // ------------------------------------------------------------------ data
@@ -128,203 +127,138 @@ async function pull() {
   } catch { /* keep last frame */ }
 }
 
-// ------------------------------------------------------------------ render
-function blockCenter(bx: number, by: number): [number, number] { return [bx * P, by * P]; }
-function lotCenter(d: { bx: number; by: number }, gx: number, gy: number): [number, number] { const [x, y] = blockCenter(d.bx, d.by); return [x + (gx - 1) * LOT, y + (gy - 1) * LOT]; }
-
-function plate(cx: number, cy: number, r: number, attrs: Record<string, string | number>, parent: Element) {
-  return svg('polygon', { points: [iso(cx - r, cy - r), iso(cx + r, cy - r), iso(cx + r, cy + r), iso(cx - r, cy + r)].map((p) => pt(p)).join(' '), ...attrs }, parent);
-}
-
-let plazaDone = false;
-const plates = new Map<string, SVGGElement>();
-function draw() {
-  const ds = layoutCity(agents);
-  if (!plazaDone) { plazaDone = true; drawPlaza(); }
-  for (const d of ds) drawDistrict(d);
-  const live = new Set<string>();
-  for (const d of ds) for (const l of d.lots) {
-    live.add(l.agent.id);
-    const [cx, cy] = lotCenter(d, l.gx, l.gy);
-    building(l.agent, cx, cy, l.height);
-  }
-  for (const [id, b] of drawn) if (id !== '__th' && !live.has(id)) { b.g.remove(); drawn.delete(id); }
-  // painter's order
-  const sorted = [...drawn.values()].sort((a, b) => a.cx + a.cy - (b.cx + b.cy));
-  for (const b of sorted) $('#blds').appendChild(b.g);
-  fitCamera(); stats();
-}
-
-function drawPlaza() {
-  const g = $('#ground');
-  const R = 40; plate(0, 0, R, { fill: '#0e1328' }, g);
-  for (let k = -6; k <= 7; k++) {
-    const i = k * P - P / 2;
-    const a = iso(i, -R), b = iso(i, R), c = iso(-R, i), d = iso(R, i);
-    svg('line', { x1: a[0], y1: a[1], x2: b[0], y2: b[1], class: 'road' }, g); svg('line', { x1: c[0], y1: c[1], x2: d[0], y2: d[1], class: 'road' }, g);
-  }
-  plate(0, 0, 2.1, { fill: '#1d2446', stroke: '#3a4380', 'stroke-width': 1 }, $('#plates'));
-  plate(0, 0, 1.4, { fill: '#262f5c' }, $('#plates'));
-  const th = svg('g', { class: 'townhall' }, $('#blds'));
-  drawBox(th, 0, 0, 0.9, 54, { top: '#f2efff', left: '#b9b3e6', right: '#8a83c4' }, 1);
-  const sp = iso(0, 0); svg('circle', { cx: sp[0], cy: sp[1] - 66, r: 4, fill: '#a99bff', class: 'spire' }, th);
-  svg('circle', { cx: sp[0], cy: sp[1] - 66, r: 10, fill: '#a99bff', opacity: 0.5, filter: 'url(#glow)' }, th);
-  label(0, 0, 'TOWN HALL', '', '#cfc8ff', 92);
-  drawn.set('__th', { g: th as SVGGElement, h: { v: 54 }, cx: 0, cy: 0, target: 54 });
-}
-
-function label(cx: number, cy: number, title: string, sub: string, color: string, lift = 80) {
-  const p = iso(cx, cy);
-  const g = svg('g', { class: 'dlabel', transform: `translate(${p[0]},${p[1] - lift})` }, $('#labels'));
-  const bg = svg('rect', { class: 'bg', rx: 9, ry: 9 }, g);
-  svg('circle', { r: 3.5, fill: color, class: 'cd' }, g);
-  const t = svg('text', { class: 't', fill: color, x: 0, y: 0 }, g); t.textContent = title;
-  const s = svg('text', { class: 's', x: 0, y: 0 }, g); s.textContent = sub;
-  (g as any)._fit = () => {
-    const tw = (t as SVGTextElement).getComputedTextLength(), sw = (s as SVGTextElement).getComputedTextLength();
-    const w = 14 + 8 + tw + (sw ? 8 + sw : 0) + 12;
-    bg.setAttribute('x', String(-w / 2)); bg.setAttribute('y', '-11'); bg.setAttribute('width', String(w)); bg.setAttribute('height', '22');
-    const x0 = -w / 2 + 14; g.querySelector('.cd')!.setAttribute('cx', String(x0)); g.querySelector('.cd')!.setAttribute('cy', '0');
-    t.setAttribute('x', String(x0 + 8)); t.setAttribute('y', '4.5'); s.setAttribute('x', String(x0 + 8 + tw + 8)); s.setAttribute('y', '4.5');
-  };
-  (g as any)._fit();
-  return g;
-}
-
-function drawDistrict(d: District) {
-  const p = plat(d.platform);
-  const key = d.platform;
-  let g = plates.get(key);
-  const [cx, cy] = blockCenter(d.bx, d.by);
-  if (!g) {
-    g = svg('g', { class: 'plate' }, $('#plates')) as SVGGElement;
-    plate(cx, cy, 2.3, { fill: p.top, 'fill-opacity': 0.07, stroke: p.top, 'stroke-opacity': 0.35, 'stroke-width': 1 }, g);
-    plate(cx, cy, 2.05, { fill: '#121834', 'fill-opacity': 0.85 }, g);
-    for (let gx = 0; gx < 3; gx++) for (let gy = 0; gy < 3; gy++) { const [x, y] = lotCenter(d, gx, gy); plate(x, y, 0.55, { fill: p.top, 'fill-opacity': 0.06 }, g); }
-    plates.set(key, g);
-    const lb = label(cx, cy, p.label.toUpperCase(), '', p.top); lb.id = 'lb-' + key; (lb as any)._lift = 80;
-    if (!RM) { gsap.from(g, { opacity: 0, duration: 0.8 }); gsap.from(lb, { opacity: 0, y: '+=8', duration: 0.8, delay: 0.2 }); }
-  }
-  const sub = $(`#lb-${key} .s`);
-  const live = d.agents.filter((a) => healthOf(a) === 'live').length;
-  sub.textContent = `${d.agents.length} · ${live} live${d.overflow ? ` · +${d.overflow}` : ''}`;
-  const lb = $(`#lb-${key}`) as any; lb._fit();
-  const lift = Math.max(...d.lots.map((l) => l.height)) + 46;
-  if (lb._lift !== lift) { lb._lift = lift; const c = iso(cx, cy); gsap.to(lb, { attr: { transform: `translate(${c[0]},${c[1] - lift})` }, duration: RM ? 0 : 1.2, ease: 'power3.out' }); }
-}
-
-function drawBox(g: Element, cx: number, cy: number, s: number, h: number, c: { top: string; left: string; right: string }, op = 1) {
-  const T = iso(cx - s, cy - s), R = iso(cx + s, cy - s), B = iso(cx + s, cy + s), L = iso(cx - s, cy + s);
-  const left = svg('polygon', { points: [pt(L), pt(B), pt(B, h), pt(L, h)].join(' '), fill: c.left, opacity: op, class: 'fl' }, g);
-  const right = svg('polygon', { points: [pt(B), pt(R), pt(R, h), pt(B, h)].join(' '), fill: c.right, opacity: op, class: 'fr' }, g);
-  const roof = svg('polygon', { points: [pt(T, h), pt(R, h), pt(B, h), pt(L, h)].join(' '), fill: c.top, opacity: op, class: 'ft' }, g);
-  return (nh: number) => {
-    left.setAttribute('points', [pt(L), pt(B), pt(B, nh), pt(L, nh)].join(' '));
-    right.setAttribute('points', [pt(B), pt(R), pt(R, nh), pt(B, nh)].join(' '));
-    roof.setAttribute('points', [pt(T, nh), pt(R, nh), pt(B, nh), pt(L, nh)].join(' '));
-  };
-}
-
-const beaconColor = (a: CityAgent) => {
-  const h = healthOf(a);
-  return a.status === 'error' ? '#ff5d6c' : h === 'offline' ? '#5b6080' : h === 'stale' ? '#f5b94a' : a.status === 'busy' ? '#4dffb0' : '#7fe0ff';
+// ------------------------------------------------------------------ render (illustrated diorama + live overlay)
+// Anchor = roof-top of each illustrated neighborhood, in image pixels (1280×720 art).
+const IMG_W = 1280, IMG_H = 720;
+const SPOT: Record<string, [number, number, number]> = { // x, roof y, ground y
+  openai: [412, 96, 244], claude: [631, 46, 190], gemini: [837, 104, 244], muse: [269, 172, 300], custom: [1006, 176, 300],
+  grokbot: [238, 316, 440], openclaw: [431, 360, 528], crewai: [647, 398, 575], langchain: [856, 386, 540], n8n: [1019, 316, 438],
 };
+const TOWNHALL: [number, number] = [644, 186];
+const initials = (n: string) => n.split(/[\s_-]+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
+const pills = new Map<string, HTMLElement>();
+const seen = new Set<string>();
 
-function building(a: CityAgent, cx: number, cy: number, height: number) {
-  const p = plat(a.platform);
-  const health = healthOf(a);
-  let b = drawn.get(a.id);
-  if (b && (b.cx !== cx || b.cy !== cy)) { b.g.remove(); drawn.delete(a.id); b = undefined; }
-  if (!b) {
-    const g = svg('g', { class: 'bld', 'data-id': a.id, tabindex: 0 }) as SVGGElement;
-    const sh = iso(cx, cy);
-    svg('ellipse', { cx: sh[0] + 6, cy: sh[1] + 4, rx: 34, ry: 12, fill: '#000', opacity: 0.25, filter: 'url(#glow)' }, g);
-    const body = svg('g', { class: 'body' }, g);
-    const set = drawBox(body, cx, cy, S, 0, p);
-    const win = svg('g', { class: 'wins' }, g);
-    const beacon = svg('g', { class: 'beacon' }, g);
-    svg('circle', { r: 9, class: 'halo', filter: 'url(#glow)' }, beacon); svg('circle', { r: 3.2, class: 'core' }, beacon);
-    const h = { v: 0 };
-    const upd = () => {
-      set(h.v); const top = iso(cx, cy); beacon.setAttribute('transform', `translate(${top[0]},${top[1] - h.v - 2})`);
-      drawWindows(win, cx, cy, h.v);
-    };
-    (g as any)._upd = upd; upd();
-    b = { g, h, cx, cy, target: 0 }; drawn.set(a.id, b);
-    g.addEventListener('pointerenter', () => tip(a.id, g)); g.addEventListener('focus', () => tip(a.id, g));
-    g.addEventListener('pointerleave', untip); g.addEventListener('blur', untip);
-    if (!RM) {
-      const ring = svg('ellipse', { cx: sh[0], cy: sh[1], rx: 10, ry: 5, fill: 'none', stroke: p.top, 'stroke-width': 2 }, $('#arcs'));
-      gsap.to(ring, { attr: { rx: 70, ry: 35 }, opacity: 0, duration: 1.4, ease: 'expo.out', onComplete: () => ring.remove() });
+function stageSetup() {
+  for (const k of Object.keys(PLATFORM)) {
+    const p = plat(k);
+    const el = document.createElement('div');
+    el.className = 'pin empty'; el.dataset.p = k;
+    el.style.setProperty('--c', p.top);
+    el.innerHTML = `<div class="card"><span class="nm"><i></i>${esc(p.label)}</span><span class="av"></span><span class="ct"></span></div><span class="stem"></span>`;
+    $('#pins').appendChild(el); pills.set(k, el);
+  }
+}
+
+const ring = (a: CityAgent) => { const h = healthOf(a); return a.status === 'error' ? 'err' : h === 'offline' ? 'off' : h === 'stale' ? 'stale' : a.status === 'busy' ? 'busy' : 'ok'; };
+
+function draw() {
+  if (!pills.size) stageSetup();
+  const by = new Map<string, CityAgent[]>();
+  for (const a of agents) { const k = PLATFORM[a.platform] ? a.platform : 'custom'; (by.get(k) ?? by.set(k, []).get(k)!).push(a); }
+  for (const [k, el] of pills) {
+    const list = (by.get(k) ?? []).sort((x, y) => (y.activity ?? 0) - (x.activity ?? 0));
+    const live = list.filter((a) => healthOf(a) === 'live').length;
+    const wasEmpty = el.classList.contains('empty');
+    el.classList.toggle('empty', !list.length);
+    el.classList.toggle('hot', list.some((a) => a.status === 'busy' && healthOf(a) === 'live'));
+    el.classList.toggle('alert', list.some((a) => a.status === 'error'));
+    const av = el.querySelector('.av')!; const MAX = 3;
+    const html = list.slice(0, MAX).map((a) => `<b class="a ${ring(a)}" data-id="${esc(a.id)}" tabindex="0">${esc(initials(a.name))}</b>`).join('') + (list.length > MAX ? `<b class="a more">+${list.length - MAX}</b>` : '');
+    if (av.innerHTML !== html) {
+      av.innerHTML = html;
+      av.querySelectorAll<HTMLElement>('.a[data-id]').forEach((n) => {
+        const id = n.dataset.id!;
+        n.addEventListener('pointerenter', () => tip(id, n)); n.addEventListener('focus', () => tip(id, n));
+        n.addEventListener('pointerleave', untip); n.addEventListener('blur', untip);
+        if (!seen.has(id)) { seen.add(id); if (!RM && !wasEmpty) gsap.from(n, { scale: 0, duration: 0.6, ease: 'back.out(2.2)' }); }
+      });
+    }
+    el.querySelector('.ct')!.textContent = list.length ? String(live) : ''; el.title = list.length ? `${live} of ${list.length} live` : 'No agents yet';
+    if (wasEmpty && list.length && !RM) {
+      gsap.fromTo(el, { y: 14, opacity: 0, scale: 0.9 }, { y: 0, opacity: 1, scale: 1, duration: 0.8, ease: 'expo.out' });
+      list.forEach((a) => seen.add(a.id));
+      ping(k);
     }
   }
-  (b.g as any)._agent = a;
-  b.g.classList.toggle('busy', a.status === 'busy' && health === 'live');
-  b.g.classList.toggle('offline', health === 'offline');
-  b.g.classList.toggle('stale', health === 'stale');
-  b.g.classList.toggle('err', a.status === 'error');
-  b.g.style.setProperty('--b', beaconColor(a));
-  if (b.target !== height) {
-    b.target = height;
-    gsap.to(b.h, { v: height, duration: RM ? 0 : 1.6, ease: 'elastic.out(1,0.75)', onUpdate: (b.g as any)._upd });
+  $('#m-empty').hidden = agents.length > 0 || mode === 'demo';
+  relayout();
+  stats();
+}
+
+const toImg = (k: string): [number, number] => { if (k === 'townhall') return TOWNHALL; const el = pills.get(k); const s = SPOT[k] ?? SPOT.custom; return el?.classList.contains('down') ? [s[0], s[2]] : [s[0], s[1]]; };
+
+// Place labels without overlaps: try above the roof, then below the block, then higher stems.
+function relayout() {
+  if (!pills.size) return;
+  const st = $('#stage'); const k = st.offsetWidth / IMG_W; const placed: DOMRect[] = [];
+  const order = [...pills.entries()].filter(([, el]) => getComputedStyle(el).display !== 'none').sort((a, b) => (SPOT[a[0]][1] - SPOT[b[0]][1]));
+  for (const [key, el] of order) {
+    const [x, ry, gy] = SPOT[key]; const w = el.offsetWidth, h = el.offsetHeight;
+    const cands: [boolean, number, number][] = [];
+    for (const down of [false, true]) for (const extra of [0, 22, 44, 66]) for (const dx of [0, -0.4, 0.4]) cands.push([down, extra, dx]);
+    let pick = cands[0]; let rect = new DOMRect();
+    const sx = st.getBoundingClientRect().left; const clampX = (cx: number) => Math.min(Math.max(cx, w / 2 + 8 - sx), innerWidth - sx - w / 2 - 8);
+    for (const c of cands) {
+      const [down, extra, dx] = c; const top = down ? gy * k + extra : ry * k - h - extra; const cx = clampX(x * k + dx * w);
+      const r = new DOMRect(cx - w / 2 - 4, top - 3, w + 8, h + 6);
+      if (!placed.some((q) => r.x < q.right && r.right > q.x && r.y < q.bottom && r.bottom > q.y)) { pick = c; rect = r; break; }
+      if (c === cands[0]) rect = r;
+    }
+    if (!rect.width) rect = new DOMRect(x * k - w / 2, ry * k - h, w, h);
+    placed.push(rect);
+    el.classList.toggle('down', pick[0]);
+    const cx = clampX(x * k + pick[2] * w);
+    el.style.left = `${cx}px`; el.style.top = `${pick[0] ? gy * k : ry * k}px`;
+    el.style.setProperty('--sx', `${x * k - cx}px`);
+    el.style.setProperty('--stem', `${14 + pick[1]}px`);
   }
 }
 
-function drawWindows(g: Element, cx: number, cy: number, h: number) {
-  g.innerHTML = '';
-  if (h < 18) return;
-  const rows = Math.floor((h - 10) / 9);
-  for (const side of [0, 1]) for (let r = 0; r < rows; r++) for (const f of [0.3, 0.7]) {
-    const a = side ? iso(cx + S, cy - S + f * 2 * S - 0.06) : iso(cx - S + f * 2 * S - 0.06, cy + S);
-    const b2 = side ? iso(cx + S, cy - S + f * 2 * S + 0.06) : iso(cx - S + f * 2 * S + 0.06, cy + S);
-    const y = 8 + r * 9;
-    svg('line', { x1: a[0], y1: a[1] - y, x2: b2[0], y2: b2[1] - y, class: 'w', style: `--d:${((r * 7 + f * 10 + side * 3) % 9) / 3}s` }, g);
-  }
-}
-
-function roof(id: string): [number, number] | null {
-  const b = drawn.get(id); if (!b) return null; const p = iso(b.cx, b.cy); return [p[0], p[1] - b.h.v];
+function ping(k: string) {
+  if (RM) return; const [x, y] = toImg(k);
+  const c = svg('ellipse', { cx: x, cy: y + 70, rx: 8, ry: 4, class: 'ping', stroke: plat(k).top }, $('#fx'));
+  gsap.to(c, { attr: { rx: 110, ry: 55 }, opacity: 0, duration: 1.6, ease: 'expo.out', onComplete: () => c.remove() });
 }
 
 function arc(from: string, to: string, platform: string) {
-  const a = roof(from), b = roof(to === 'townhall' ? '__th' : to); if (!a || !b || RM) return;
-  const mx = (a[0] + b[0]) / 2, my = Math.min(a[1], b[1]) - 60 - Math.hypot(b[0] - a[0], b[1] - a[1]) * 0.25;
-  const d = `M${a[0]},${a[1]} Q${mx},${my} ${b[0]},${b[1]}`;
+  if (RM) return;
+  const pa = agents.find((a) => a.id === from)?.platform ?? platform;
+  const pb = to === 'townhall' ? 'townhall' : agents.find((a) => a.id === to)?.platform; if (!pb) return;
+  const a = toImg(PLATFORM[pa] ? pa : 'custom'), b = toImg(pb === 'townhall' ? 'townhall' : PLATFORM[pb] ? pb : 'custom');
+  const A: [number, number] = [a[0], a[1] - 8], B: [number, number] = [b[0], b[1] - 8];
+  const same = Math.hypot(B[0] - A[0], B[1] - A[1]) < 4;
+  const mx = (A[0] + B[0]) / 2, my = Math.min(A[1], B[1]) - (same ? 60 : 40 + Math.hypot(B[0] - A[0], B[1] - A[1]) * 0.22);
+  const d = same ? `M${A[0] - 30},${A[1]} Q${A[0]},${my} ${A[0] + 30},${A[1]}` : `M${A[0]},${A[1]} Q${mx},${my} ${B[0]},${B[1]}`;
   const c = plat(platform).top;
-  const path = svg('path', { d, class: 'arc', stroke: c }, $('#arcs')) as SVGPathElement;
+  const g = svg('g', {}, $('#fx'));
+  const glow = svg('path', { d, class: 'arc-glow', stroke: c }, g) as SVGPathElement;
+  const path = svg('path', { d, class: 'arc' }, g) as SVGPathElement;
   const len = path.getTotalLength();
-  path.style.strokeDasharray = `${len}`; path.style.strokeDashoffset = `${len}`;
-  const dot = svg('circle', { r: 4, fill: '#fff' }, $('#arcs')); const glow = svg('circle', { r: 11, fill: c, opacity: 0.7, filter: 'url(#glow)' }, $('#arcs'));
+  for (const e of [path, glow]) { e.style.strokeDasharray = `${len}`; e.style.strokeDashoffset = `${len}`; }
+  const dot = svg('circle', { r: 5, class: 'arc-dot', fill: c }, g);
   const o = { t: 0 };
-  gsap.timeline({ onComplete: () => { path.remove(); dot.remove(); glow.remove(); } })
-    .to(path, { strokeDashoffset: 0, duration: 1.1, ease: 'power2.inOut' })
-    .to(o, { t: 1, duration: 1.1, ease: 'power2.inOut', onUpdate: () => { const q = path.getPointAtLength(o.t * len); for (const e of [dot, glow]) { e.setAttribute('cx', String(q.x)); e.setAttribute('cy', String(q.y)); } } }, 0)
-    .to([path, dot, glow], { opacity: 0, duration: 0.6 }, 1.3);
-  const target = drawn.get(to);
-  if (target) gsap.fromTo(target.g.querySelector('.beacon .halo'), { attr: { r: 9 } }, { attr: { r: 22 }, duration: 0.5, yoyo: true, repeat: 1, delay: 1.1 });
+  gsap.timeline({ onComplete: () => g.remove() })
+    .to([path, glow], { strokeDashoffset: 0, duration: 1.2, ease: 'power2.inOut' })
+    .to(o, { t: 1, duration: 1.2, ease: 'power2.inOut', onUpdate: () => { const q = path.getPointAtLength(o.t * len); dot.setAttribute('cx', String(q.x)); dot.setAttribute('cy', String(q.y)); } }, 0)
+    .to(g, { opacity: 0, duration: 0.7 }, 1.5);
+  const tgt = pills.get(pb);
+  if (tgt) gsap.fromTo(tgt.querySelector('.card'), { scale: 1 }, { scale: 1.06, duration: 0.25, yoyo: true, repeat: 1, delay: 1.15, ease: 'power2.out' });
 }
 
-// ------------------------------------------------------------------ camera
-const cam = { x: view.x, y: view.y, w: view.w, h: view.h };
-function fitCamera(instant = false) {
-  const pts: [number, number][] = [[0, 0]];
-  for (const b of drawn.values()) { const [x, y] = iso(b.cx, b.cy); pts.push([x - 100, y - b.target - 90], [x + 100, y + 60]); }
-  let x0 = Math.min(...pts.map((p) => p[0])), x1 = Math.max(...pts.map((p) => p[0]));
-  let y0 = Math.min(...pts.map((p) => p[1])), y1 = Math.max(...pts.map((p) => p[1]));
+// ------------------------------------------------------------------ stage fit
+function fitStage() {
   const W = innerWidth, H = innerHeight, mob = W < 820;
-  // leave room for the hero (left) and feed (right) on desktop
-  const padL = mob ? 0.05 : 0.30, padR = mob ? 0.05 : 0.30, padT = mob ? 0.34 : 0.12, padB = mob ? 0.22 : 0.12;
-  let w = Math.max(x1 - x0, 520), h = Math.max(y1 - y0, 320);
-  const sx = w / (1 - padL - padR), sy = h / (1 - padT - padB);
-  const scale = Math.max(sx / W, sy / H);
-  const vw = W * scale, vh = H * scale;
-  const cxm = (x0 + x1) / 2, cym = (y0 + y1) / 2;
-  const tx = cxm - vw * (padL + (1 - padL - padR) / 2), ty = cym - vh * (padT + (1 - padT - padB) / 2);
-  gsap.to(view, { x: tx, y: ty, w: vw, h: vh, duration: instant || RM ? 0 : 2.2, ease: 'power3.inOut', overwrite: true });
-}
-function tickCamera() {
-  cam.x = view.x; cam.y = view.y; cam.w = view.w; cam.h = view.h;
-  $('#city').setAttribute('viewBox', `${cam.x.toFixed(1)} ${cam.y.toFixed(1)} ${cam.w.toFixed(1)} ${cam.h.toFixed(1)}`);
+  const st = $('#stage');
+  let w: number, x: number, y: number;
+  if (mob) { w = W * 1.18; x = (W - w) / 2; y = 196 + Math.max(0, (H * 0.66 - 196 - w * 0.5625) / 2); }
+  else {
+    const availW = W - 370; // feed column on the right
+    w = Math.min(availW - 30, (H - 70) * (IMG_W / IMG_H));
+    x = Math.max(60, 110 + (availW - 110 - w) / 2); y = Math.max(64, (H - w * IMG_H / IMG_W) / 2 + 22);
+  }
+  st.style.width = `${w}px`; st.style.left = `${x}px`; st.style.top = `${y}px`;
+  requestAnimationFrame(relayout);
 }
 
 // ------------------------------------------------------------------ chrome
@@ -349,11 +283,11 @@ function pushFeed(f: FeedItem, animate = true) {
 }
 
 function tip(id: string, g: Element) {
-  const a = (g as any)._agent as CityAgent; const p = plat(a.platform); const t = $('#m-tip'); const r = g.getBoundingClientRect();
+  const a = agents.find((x) => x.id === id); if (!a) return; const p = plat(a.platform); const t = $('#m-tip'); const r = g.getBoundingClientRect(); void id;
   const h = healthOf(a);
   t.innerHTML = `<b>${esc(a.name)}</b><span class="pf" style="--c:${p.top}">${esc(p.label)}</span><p>${esc(a.task || '—')}</p><small>${a.status === 'error' ? 'Error' : h === 'live' ? (a.status === 'busy' ? 'Working' : 'Online') : h === 'stale' ? 'Quiet for 15m+' : 'Offline'} · ${a.activity ?? 0} events / 24h${a.pending ? ` · ${a.pending} waiting at Town Hall` : ''}</small>`;
   t.style.left = `${r.left + r.width / 2}px`; t.style.top = `${r.top - 8}px`;
-  gsap.to(t, { opacity: 1, y: 0, duration: 0.2 }); void id;
+  gsap.to(t, { opacity: 1, y: 0, duration: 0.2 });
 }
 function untip() { gsap.to('#m-tip', { opacity: 0, duration: 0.15 }); }
 
