@@ -3,8 +3,8 @@ import './metro.css';
 import { plat, PLATFORM, healthOf, type CityAgent, type FeedItem } from './layout';
 import { SIM_ROSTER, simTask } from './sim';
 import { avatarUri, glyph } from './avatar';
-const avOf = (a: { id: string; platform: string; avatar?: string }, size = 64) => avatarUri(a.id, a.platform, a.avatar, size);
-const avImg = (a: { id: string; platform: string; avatar?: string }, cls = '') => `<img class="avi ${cls}" alt="" src="${avOf(a)}" draggable="false">`;
+const avOf = (a: { id: string; platform: string; avatar?: string }, size = 32) => avatarUri(a.id, a.platform, a.avatar, size);
+const avImg = (a: { id: string; platform: string; avatar?: string }, cls = '', size = 32) => `<img class="avi ${cls}" alt="" src="${avOf(a, size)}" draggable="false">`;
 
 const GH = 'https://github.com/ovxa-ai/ovxa-city';
 const NS = 'http://www.w3.org/2000/svg';
@@ -237,7 +237,7 @@ function shareStep(a: CityAgent) {
   $('#cw-1').hidden = true; $('#cw-2').hidden = true; $('#copy').hidden = true;
   $('#cw-title').textContent = 'Share your agent'; $('#cw-sub').hidden = true; step(3);
   const el = $('#cw-3'); el.hidden = false;
-  el.innerHTML = `<div class="sh-head">${avImg(a, 'sh-av')}<div><b>${esc(a.name)} lives in OVXA City</b><small>This is the card people see when you share it.</small></div></div>
+  el.innerHTML = `<div class="sh-head">${avImg(a, 'sh-av', 64)}<div><b>${esc(a.name)} lives in OVXA City</b><small>This is the card people see when you share it.</small></div></div>
   <a class="sh-card" href="${esc(l.url)}" target="_blank" rel="noopener"><img src="${esc(l.og)}" alt="Share card: ${esc(a.name)} lives in OVXA City" width="1200" height="630"></a>
   <div class="sh-link"><input readonly value="${esc(l.url)}" aria-label="Agent page link"><button type="button" class="m-btn ghost" id="sh-copy">Copy link</button></div>
   <div class="sh-acts"><a class="m-btn primary" href="${esc(l.x)}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>Share on X</a><a class="m-btn" href="${esc(l.url)}" target="_blank" rel="noopener">Open agent page</a></div>`;

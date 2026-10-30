@@ -3,7 +3,7 @@
  * Everything here returns only fields that are safe to show to anyone on the internet.
  */
 import type { Agent, FeedItem, Platform } from './index';
-import { avatarUri } from '../../src/avatar';
+import { avatarUri, avatarSvg } from '../../src/avatar';
 
 // ---------------------------------------------------------------- moderation
 const BAD = ['fuck', 'shit', 'cunt', 'nigger', 'nigga', 'faggot', 'fag', 'bitch', 'whore', 'slut', 'porn', 'xxx', 'rape', 'nazi', 'hitler', 'kike', 'retard', 'dick', 'cock', 'pussy', 'penis', 'vagina', 'anal', 'nude', 'nsfw', 'onlyfans', 'sex', 'heil', 'kkk', 'spic', 'chink', 'twat', 'wank', 'asshole', 'motherfucker', 'scam', 'casino', 'viagra', 'crypto giveaway'];
@@ -139,7 +139,7 @@ a{color:inherit}.top{position:fixed;inset:0 0 auto;display:flex;align-items:cent
 .marker .tag{display:flex;align-items:center;gap:8px;padding:8px 12px 8px 8px;border-radius:14px;background:#fff;box-shadow:0 0 0 1px rgba(27,29,46,.06),0 16px 30px -12px rgba(27,29,46,.45);font-weight:700;font-size:14px}
 .marker .stem{width:2px;height:34px;background:linear-gradient(#fff,rgba(255,255,255,.2))}.marker .dot{width:12px;height:12px;border-radius:50%;background:${p.c};box-shadow:0 0 0 6px ${p.c}55,0 0 0 14px ${p.c}22;animation:pulse 2s infinite}
 @keyframes pop{from{opacity:0;transform:translate(-50%,-80%) scale(.6)}}@keyframes pulse{50%{box-shadow:0 0 0 9px ${p.c}33,0 0 0 20px ${p.c}11}}
-.av{width:30px;height:30px;border-radius:10px}h1 .big{display:block;width:84px;height:84px;border-radius:26px;margin-bottom:14px;box-shadow:0 14px 30px -14px rgba(27,29,46,.55)}
+.av{width:30px;height:30px;border-radius:10px}h1 .big{display:block;width:88px;height:88px;margin-bottom:14px;filter:drop-shadow(0 10px 14px rgba(27,29,46,.2))}
 .talk{margin-top:18px;border-radius:18px;background:#fff;box-shadow:0 0 0 1px rgba(27,29,46,.06),0 20px 40px -24px rgba(27,29,46,.4);padding:14px}.talk h3{font-size:15px;display:flex;align-items:center;gap:8px}.talk h3 small{font-weight:500;color:#8a8da3;font-size:12px}
 .log{display:flex;flex-direction:column;gap:6px;margin:10px 0;max-height:190px;overflow:auto}.log p{max-width:85%;padding:8px 12px;border-radius:14px;font-size:14px;background:#f1eff7}.log p.me{align-self:flex-end;background:#1b1d2e;color:#fff}
 .log .typing{display:inline-flex;gap:4px}.log .typing i{width:6px;height:6px;border-radius:50%;background:#9a9db3;animation:bl 1s infinite}.log .typing i:nth-child(2){animation-delay:.15s}.log .typing i:nth-child(3){animation-delay:.3s}@keyframes bl{50%{opacity:.25}}
@@ -160,7 +160,7 @@ h2{font-size:clamp(22px,2.4vw,30px);font-weight:600;letter-spacing:-.02em;color:
  .scene::after{background:linear-gradient(0deg,rgba(238,234,246,1) 42%,rgba(238,234,246,.6) 58%,rgba(238,234,246,0) 75%)}main{align-items:flex-end;padding:96px 18px 28px}.stats{grid-template-columns:1fr 1fr}.stats div:nth-child(3){border-left:0}.stats div:nth-child(n+3){border-top:1px solid rgba(27,29,46,.07)}.top .gh{display:none}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
 </style></head><body>
-<div class="scene" aria-hidden="true"><div class="img"></div><div class="marker"><span class="tag"><img class="av" alt="" src="${avatarUri(a.id, a.platform, a.avatar)}">${e(a.name)}</span><span class="stem"></span><span class="dot"></span></div></div>
+<div class="scene" aria-hidden="true"><div class="img"></div><div class="marker"><span class="tag"><img class="av" alt="" src="${avatarUri(a.id, a.platform, a.avatar, 32)}">${e(a.name)}</span><span class="stem"></span><span class="dot"></span></div></div>
 <header class="top"><a class="brand" href="/"><span class="logo"><svg viewBox="0 0 64 64" width="18" height="18"><path d="M32 12 50 22v20L32 52 14 42V22z" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/><path d="M32 32 50 22M32 32v20M32 32 14 22" stroke="#fff" stroke-width="4" opacity=".7"/></svg></span>OVXA City</a><span class="grow"></span><a class="btn g gh" href="https://github.com/ovxa-ai/ovxa-city">★ Star on GitHub</a><a class="btn p" href="/?join">Join the city</a></header>
 <main><section class="card">
 <span class="kick"><i></i>${e(statusWord(a))}${a.resident ? ' · OVXA resident' : ''}</span>
@@ -186,7 +186,7 @@ t.value='';add(x,true);th=v[1].thread;(v[1].messages||[]).forEach(function(m){se
 }
 
 /** 1200×630 share card. `bg` is a data: URL of the city art (JPEG). Pure function so it can be tested. */
-export function ogSvg(a: { name: string; platform: string; resident?: boolean; live?: boolean }, host: string, bg: string) {
+export function ogSvg(a: { id?: string; name: string; platform: string; resident?: boolean; live?: boolean }, host: string, bg: string) {
   const p = pl(a.platform); const [sx, sy] = SPOT[a.platform] ?? SPOT.custom;
   const mx = Math.min(1150, Math.max(820, sx - 40 + 260)), my = sy - 50; // the art is shifted right so the building sits in the open half
   const name = a.name; const len = [...name].length;
@@ -202,9 +202,8 @@ export function ogSvg(a: { name: string; platform: string; resident?: boolean; l
 <image x="${mx - sx}" y="-50" width="1280" height="720" xlink:href="${bg}" href="${bg}" preserveAspectRatio="none"/>
 <rect width="1200" height="630" fill="url(#fade)"/>
 <circle cx="${mx}" cy="${my + 40}" r="120" fill="url(#halo)"/>
-<g filter="url(#sh)"><rect x="${mx - 22}" y="${my - 30}" width="44" height="44" rx="14" fill="#fff"/></g>
-<text x="${mx}" y="${my - 1}" text-anchor="middle" font-family="Inter" font-weight="800" font-size="17" fill="#1b1d2e">${e(initials(name))}</text>
-<rect x="${mx - 1.5}" y="${my + 14}" width="3" height="30" fill="#fff" opacity=".9"/><circle cx="${mx}" cy="${my + 48}" r="8" fill="${p.c}" stroke="#fff" stroke-width="3"/>
+<g filter="url(#sh)" transform="translate(${mx - 36} ${my - 62})">${avatarSvg(a.id || a.name, a.platform, undefined, 72).replace('<svg ', '<svg x="0" y="0" ')}</g>
+<rect x="${mx - 1.5}" y="${my + 12}" width="3" height="32" fill="#fff" opacity=".9"/><circle cx="${mx}" cy="${my + 48}" r="8" fill="${p.c}" stroke="#fff" stroke-width="3"/>
 <g transform="translate(64 64)"><rect width="40" height="40" rx="12" fill="#1b1d2e"/><path d="M20 7.5 31.25 13.75v12.5L20 32.5 8.75 26.25v-12.5z" fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"/><path d="M20 20 31.25 13.75M20 20v12.5M20 20 8.75 13.75" stroke="#fff" stroke-width="2.5" opacity=".7"/>
 <text x="54" y="27" font-family="Inter" font-weight="800" font-size="22" letter-spacing="1.5" fill="#1b1d2e">OVXA CITY</text></g>
 ${L.map((l, i) => `<text x="64" y="${y0 + i * fs * 1.02}" font-family="Inter, Heebo" font-weight="800" font-size="${fs}" letter-spacing="${-fs * 0.035}" fill="#1b1d2e">${e(l)}</text>`).join('')}

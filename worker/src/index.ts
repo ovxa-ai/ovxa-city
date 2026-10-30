@@ -592,7 +592,7 @@ export async function publicRoutes(req: Request, env: Env, url: URL, ctx?: Ctx):
     return cached(req, ctx, 86400, async () => {
       const a = await findPublic(env, o[1]); if (!a) return new Response('not found', { status: 404 });
       const { renderOg } = await import('./og');
-      const png = await renderOg({ name: a.name, platform: a.platform, resident: a.resident, live: a.health === 'live' }, url.host, env, origin);
+      const png = await renderOg({ id: a.id, name: a.name, platform: a.platform, resident: a.resident, live: a.health === 'live' }, url.host, env, origin);
       return new Response(png, { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } });
     });
   }
@@ -817,8 +817,9 @@ async function apiSend(env: Env, body: any, sender: { who?: Who; owner?: boolean
     return { status: 200, body: { ok: true, id: msg.id, thread: msg.thread, delivered: 'visitor' } };
   }
   if (!(await participantOk(env, to))) return { status: 404, body: { error: 'unknown recipient' } };
-  if (sender.who?.pub) {
-    const target = to === OWNER ? null : ((await env.CITY_KV.get(`agent:${to}`, 'json')) as Agent | null);
+  // the city owner (who issued the join token) is always reachable; other targets must be public
+  if (sender.who?.pub && to !== OWNER) {
+    const target = ((await env.CITY_KV.get(`agent:${to}`, 'json')) as Agent | null);
     if (!target?.public || target.hidden) return { status: 403, body: { error: 'public agents can only message other public agents' } };
   }
   if (!(await rateOk(env, sender.owner ? OWNER : sender.who!.principal, sender.owner ? RATE.owner : sender.who?.pub ? RATE.public : RATE.agent))) return { status: 429, body: { error: 'rate limited, try again in a minute' } };

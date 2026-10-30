@@ -1,53 +1,44 @@
 /**
  * Deterministic agent avatars and neutral platform glyphs. Pure strings, no DOM, shared by the app and the Worker.
- * Every agent gets a friendly little robot built from its id: shape, eyes, mouth, antenna and colors.
+ * Every agent gets a soft-3D squircle badge: platform hue, per-agent tone and monogram from its id.
  * Platform glyphs are plain geometric marks, not brand logos.
  */
-const PAL: Record<string, [string, string]> = { // [light, deep] per platform
-  openai: ['#5ee0b5', '#1f7f63'], grokbot: ['#c9cdd8', '#626a80'], claude: ['#f0a27a', '#a65738'], openclaw: ['#ff7a7a', '#a83a48'],
-  muse: ['#c49bff', '#7650c4'], langchain: ['#7fd3ff', '#337eb0'], crewai: ['#ffb35c', '#b06a22'], n8n: ['#ff8fb8', '#b0466e'],
-  gemini: ['#8fb0ff', '#4563b8'], custom: ['#e8e2c8', '#8c8668'],
+// Platform families: base hue / saturation, tuned to the soft daylight palette of the diorama.
+const FAM: Record<string, [number, number]> = {
+  openai: [158, 46], grokbot: [228, 14], claude: [20, 62], openclaw: [356, 58], muse: [268, 50],
+  langchain: [200, 58], crewai: [32, 70], n8n: [334, 54], gemini: [222, 62], custom: [44, 30],
 };
-const ACC = ['#ffd36b', '#7fe3c4', '#ff9db5', '#9fc2ff', '#c7a8ff', '#ffb37a', '#8fe08a', '#ffe08f'];
 export function hash(s: string) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
 const ex = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 export const isEmoji = (v?: string) => !!v && !v.startsWith('https:') && v.length <= 16;
+const hsl = (h: number, s: number, l: number) => `hsl(${Math.round(((h % 360) + 360) % 360)},${Math.round(s)}%,${Math.round(l)}%)`;
+/** iOS-style continuous-corner squircle in a 64 box, inset by `i`. */
+const sq = (i: number) => { const a = i, b = 64 - i, k = (b - a) * 0.3; return `M${a + k} ${a}H${b - k}C${b - k * 0.18} ${a} ${b} ${a + k * 0.18} ${b} ${a + k}V${b - k}C${b} ${b - k * 0.18} ${b - k * 0.18} ${b} ${b - k} ${b}H${a + k}C${a + k * 0.18} ${b} ${a} ${b - k * 0.18} ${a} ${b - k}V${a + k}C${a} ${a + k * 0.18} ${a + k * 0.18} ${a} ${a + k} ${a}Z`; };
+export const monogram = (id: string) => ((id || 'a').replace(/^(ovxa|oc|agent)[-_.]/, '').match(/[a-z0-9]/i)?.[0] ?? 'A').toUpperCase();
 
-/** A 64×64 SVG avatar. `custom` may be an emoji or an https URL (URL only where the caller allows it). */
+/**
+ * Agent badge: soft-3D squircle (platform hue, per-agent tone from the id), top light, inner rim,
+ * white monogram, and from 24px up a small white chip with the platform glyph.
+ * `custom` may be an emoji or an https URL (URL only where the caller allows it).
+ */
 export function avatarSvg(id: string, platform: string, custom?: string, size = 64) {
-  const [light, deep] = PAL[platform] ?? PAL.custom;
-  const h = hash(id || 'agent'), b = (n: number, m: number) => Math.floor(h / n) % m;
-  const acc = ACC[b(1, ACC.length)];
+  const [H, S] = FAM[platform] ?? FAM.custom;
+  const h = hash(id || 'agent');
+  const hue = H + ((h % 21) - 10), sat = S + ((h >>> 9) % 11) - 5, d = ((h >>> 5) % 7) - 3; // per-agent tone
+  const top = hsl(hue - 8, sat * 0.85, 92 + d * 0.6), bot = hsl(hue + 6, sat, 79 + d), slab = hsl(hue + 8, sat * 0.9, 64 + d), ink = hsl(hue + 6, Math.min(sat + 12, 80), 30 + d);
+  const u = `a${h.toString(36)}${size}`;
   const open = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 64 64">`;
-  const bg = `<defs><linearGradient id="g${h}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${light}"/><stop offset="1" stop-color="${mix(light, deep, 0.35)}"/></linearGradient></defs><rect width="64" height="64" rx="20" fill="url(#g${h})"/>`;
-  if (custom && isEmoji(custom)) return `${open}${bg}<text x="32" y="43" text-anchor="middle" font-size="30">${ex(custom)}</text></svg>`;
-  if (custom && /^https:\/\//.test(custom)) return `${open}${bg}<clipPath id="c${h}"><rect width="64" height="64" rx="20"/></clipPath><image href="${ex(custom)}" width="64" height="64" clip-path="url(#c${h})" preserveAspectRatio="xMidYMid slice"/></svg>`;
-  const face = '#fffdf7', ink = '#1b1d2e';
-  const heads = [
-    `<rect x="14" y="18" width="36" height="32" rx="12" fill="${face}"/>`,
-    `<circle cx="32" cy="34" r="18" fill="${face}"/>`,
-    `<path d="M32 15 50 25v18L32 53 14 43V25z" fill="${face}" stroke="${face}" stroke-width="4" stroke-linejoin="round"/>`,
-    `<rect x="13" y="20" width="38" height="28" rx="14" fill="${face}"/>`,
-  ];
-  const ants = [
-    '', `<path d="M32 18V9" stroke="${face}" stroke-width="3" stroke-linecap="round"/><circle cx="32" cy="8" r="4" fill="${acc}" stroke="${face}" stroke-width="2"/>`,
-    `<path d="M24 19 20 10M40 19l4-9" stroke="${face}" stroke-width="3" stroke-linecap="round"/><circle cx="20" cy="9" r="3" fill="${acc}"/><circle cx="44" cy="9" r="3" fill="${acc}"/>`,
-    `<path d="M26 18q6-9 12 0" fill="${acc}" stroke="${face}" stroke-width="2"/>`,
-  ];
-  const eyes = [
-    `<circle cx="25" cy="32" r="3.6" fill="${ink}"/><circle cx="39" cy="32" r="3.6" fill="${ink}"/><circle cx="26.2" cy="30.8" r="1.2" fill="#fff"/><circle cx="40.2" cy="30.8" r="1.2" fill="#fff"/>`,
-    `<path d="M21 33q4-5 8 0M35 33q4-5 8 0" fill="none" stroke="${ink}" stroke-width="3" stroke-linecap="round"/>`,
-    `<rect x="19" y="27" width="26" height="10" rx="5" fill="${ink}"/><circle cx="26" cy="32" r="2.4" fill="${acc}"/><circle cx="38" cy="32" r="2.4" fill="${acc}"/>`,
-    `<ellipse cx="25" cy="32" rx="3" ry="4.4" fill="${ink}"/><ellipse cx="39" cy="32" rx="3" ry="4.4" fill="${ink}"/>`,
-    `<circle cx="25" cy="32" r="5" fill="#fff" stroke="${ink}" stroke-width="2"/><circle cx="25.5" cy="32.5" r="2.4" fill="${ink}"/><circle cx="39" cy="32" r="5" fill="#fff" stroke="${ink}" stroke-width="2"/><circle cx="39.5" cy="32.5" r="2.4" fill="${ink}"/>`,
-  ];
-  const mouths = [
-    `<path d="M27 41q5 4 10 0" fill="none" stroke="${ink}" stroke-width="2.6" stroke-linecap="round"/>`,
-    `<path d="M26.5 40h11q0 6-5.5 6t-5.5-6z" fill="${ink}"/><path d="M29 44.5q3 1.6 6 0" stroke="#ff8f9e" stroke-width="2" fill="none"/>`,
-    `<rect x="27" y="40" width="10" height="3" rx="1.5" fill="${ink}"/>`,
-    `<path d="M28 41q4 3 8 0" fill="none" stroke="${ink}" stroke-width="2.6" stroke-linecap="round"/><circle cx="20" cy="39" r="2.6" fill="#ff9db5" opacity=".7"/><circle cx="44" cy="39" r="2.6" fill="#ff9db5" opacity=".7"/>`,
-  ];
-  return `${open}${bg}<g>${ants[b(7, ants.length)]}${heads[b(31, heads.length)]}${eyes[b(131, eyes.length)]}${mouths[b(1031, mouths.length)]}</g></svg>`;
+  const defs = `<defs><linearGradient id="${u}g" x1="0" y1="0" x2=".3" y2="1"><stop offset="0" stop-color="${top}"/><stop offset="1" stop-color="${bot}"/></linearGradient>`
+    + `<linearGradient id="${u}r" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".95"/><stop offset=".45" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>`;
+  // soft-3D tile: a slab edge below (like the diorama's ground), a pastel top face, a crisp top-light rim
+  const tile = (inner: string) => `<path d="${sq(3)}" transform="translate(0 3)" fill="${slab}"/><path d="${sq(3)}" fill="url(#${u}g)"/>${inner}<path d="${sq(3.6)}" fill="none" stroke="url(#${u}r)" stroke-width="1.2"/><path d="${sq(3)}" fill="none" stroke="${ink}" stroke-opacity=".10"/>`;
+  if (custom && isEmoji(custom)) return `${open}${defs}${tile(`<text x="32" y="41.5" text-anchor="middle" font-size="28">${ex(custom)}</text>`)}</svg>`;
+  if (custom && /^https:\/\//.test(custom)) return `${open}${defs}<clipPath id="${u}c"><path d="${sq(3)}"/></clipPath>${tile(`<image href="${ex(custom)}" width="64" height="64" clip-path="url(#${u}c)" preserveAspectRatio="xMidYMid slice"/>`)}</svg>`;
+  const chip = size >= 56;
+  const font = `font-family="Inter, 'SF Pro Display', -apple-system, 'Segoe UI', Roboto, sans-serif" font-weight="650" letter-spacing="-.4"`;
+  const letter = `<text x="${chip ? 29 : 32}" y="${chip ? 40.5 : 42}" text-anchor="middle" ${font} font-size="${chip ? 26 : 30}" fill="${ink}">${monogram(id)}</text>`;
+  const badge = chip ? `<circle cx="47" cy="47.5" r="9.5" fill="${slab}"/><circle cx="47" cy="46.5" r="9.5" fill="#fff"/><g transform="translate(40.4 39.9) scale(.55)" color="${ink}">${GLYPH[platform] ?? GLYPH.custom}</g>` : '';
+  return `${open}${defs}${tile(letter)}${badge}</svg>`;
 }
 export const avatarUri = (id: string, platform: string, custom?: string, size = 64) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(avatarSvg(id, platform, custom, size))}`;
 
@@ -55,20 +46,16 @@ export const avatarUri = (id: string, platform: string, custom?: string, size = 
 export const GLYPH: Record<string, string> = {
   openai: '<circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="2.4"/><circle cx="12" cy="12" r="2.4" fill="currentColor"/>',
   grokbot: '<path d="M5 17 12 5l7 12z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/>',
-  claude: '<path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
+  claude: '<path d="M8 4v5M16 4v5M6 9h12v3a6 6 0 0 1-12 0zM12 18v3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
   openclaw: '<path d="M6 18c0-7 3-12 6-12s6 5 6 12M9 18c0-4 1.4-7 3-7s3 3 3 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
   muse: '<path d="M12 4c4 4 4 12 0 16-4-4-4-12 0-16z" fill="currentColor" opacity=".9"/>',
   langchain: '<rect x="3" y="9" width="9" height="6" rx="3" fill="none" stroke="currentColor" stroke-width="2.2"/><rect x="12" y="9" width="9" height="6" rx="3" fill="none" stroke="currentColor" stroke-width="2.2"/>',
   crewai: '<circle cx="8" cy="9" r="3" fill="currentColor"/><circle cx="16" cy="9" r="3" fill="currentColor"/><path d="M3 19c1-3 3-4 5-4s4 1 4 4m0 0c0-3 2-4 4-4s4 1 5 4" fill="none" stroke="currentColor" stroke-width="2"/>',
   n8n: '<circle cx="5" cy="12" r="2.6" fill="currentColor"/><circle cx="19" cy="7" r="2.6" fill="currentColor"/><circle cx="19" cy="17" r="2.6" fill="currentColor"/><path d="M7.5 12h4l5-5M11.5 12l5 5" fill="none" stroke="currentColor" stroke-width="2"/>',
-  gemini: '<path d="M12 3l2.2 6.8L21 12l-6.8 2.2L12 21l-2.2-6.8L3 12l6.8-2.2z" fill="currentColor"/>',
+  gemini: '<path d="M12 3.5 20.5 12 12 20.5 3.5 12z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/>',
   custom: '<rect x="5" y="5" width="14" height="14" rx="4" fill="none" stroke="currentColor" stroke-width="2.4"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/>',
   mcp: '<path d="M8 4v5M16 4v5M6 9h12v3a6 6 0 0 1-12 0zM12 18v3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
   live: '<path d="M4 12h3l2-5 4 10 2-5h5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
 };
 export const glyph = (k: string, size = 16) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true">${GLYPH[k] ?? GLYPH.custom}</svg>`;
 
-function mix(a: string, b: string, t: number) {
-  const p = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-  const x = p(a), y = p(b); return '#' + x.map((v, i) => Math.round(v + (y[i] - v) * t).toString(16).padStart(2, '0')).join('');
-}

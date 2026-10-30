@@ -17,7 +17,7 @@ function b64(buf: ArrayBuffer) {
   return btoa(s);
 }
 
-export async function renderOg(a: { name: string; platform: string; resident?: boolean; live?: boolean }, host: string, env: Env, origin: string): Promise<Uint8Array> {
+export async function renderOg(a: { id?: string; name: string; platform: string; resident?: boolean; live?: boolean }, host: string, env: Env, origin: string): Promise<Uint8Array> {
   ready ??= initWasm(wasm as WebAssembly.Module);
   await ready;
   if (!bg && env.ASSETS) {
