@@ -1,12 +1,14 @@
 <div align="center">
 
-<img src="docs/desktop.png" alt="OVXA City: your AI bots as a floating isometric city" width="100%">
+<img src="docs/city-multi.png" alt="OVXA City: every AI agent in one isometric city" width="100%">
 
 # OVXA City
 
-**Your AI bots, as a living city.** Every bot gets a building. Anything risky waits at Town Hall until you approve it.
+**Every AI agent. One city.**
 
-[Live demo (sample data)](#demo) · [60-second quickstart](#-60-second-quickstart) · [Routine prompts](docs/ROUTINES.md) · ⭐ [Star OVXA](https://github.com/ovxa-ai)
+OpenAI, Grok Bot, Claude / MCP, OpenClaw, Muse, LangChain, CrewAI, n8n and your own bots report to **one endpoint** and live on **one map**. Districts by platform, towers grow with activity, live feed, hand-offs drawn between agents.
+
+[Integrations](docs/INTEGRATIONS.md) · [Quickstart](#-quickstart) · ⭐ [Star OVXA](https://github.com/ovxa-ai)
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/ovxa-ai/ovxa-city)
 
@@ -14,29 +16,59 @@
 
 ---
 
-<img src="docs/hero.gif" alt="Approving a request and switching to night" width="100%">
+https://github.com/ovxa-ai/ovxa-city/raw/main/docs/hero-multi.mp4
 
-## ⚡ 60-second quickstart
+<img src="docs/hero-multi.gif" alt="27 agents from 10 platforms joining the city" width="100%">
 
-**Option A, one click.** Press **Deploy to Cloudflare** above. Cloudflare copies the repo, creates the KV store, builds the app and deploys it. Set a password when it asks. You can leave `BOTS` as `{}` for now.
+## ⚡ Quickstart
 
-**Option B, terminal (recommended).** This also generates your bot tokens:
+1. **Deploy** with the button above (set a password). Open your city → **Connect an agent** → **Generate join token**.
+2. **Send one request** from any agent:
 
 ```bash
-git clone https://github.com/ovxa-ai/ovxa-city && cd ovxa-city
-npm install
-npm run setup        # asks for bot names → sets secrets → deploys → prints what to paste to each bot
+curl -X POST https://<your-city>.workers.dev/api/v1/agents \
+  -H "Authorization: Bearer <JOIN_TOKEN>" -H "content-type: application/json" \
+  -d '{"agent":{"id":"my-agent","name":"My Agent","platform":"openai"},"status":"busy","task":"Drafting the weekly report"}'
 ```
 
-Then paste the [bot prompt](#paste-this-to-your-bot) into each Grok Bot. That's the whole setup.
+3. Watch it move in. That's it. Chat-only bots: paste the **Prompt** tab. MCP clients: add `https://<your-city>.workers.dev/mcp`.
 
-## What it is
+## Integrations
 
-- **A city of your bots.** Buildings are config-driven. Your chief of staff takes the tower, your router takes the dish, and the rest move into the offices. A new bot shows up as a crane on the construction lot.
-- **Town Hall.** A single queue of actions your bots are holding for you. Approve or decline, and the decision goes straight to that bot's webhook.
-- **Day and night.** Real window lights, cars with headlights, reduced-motion support, keyboard navigation and a mobile bottom sheet.
-- **English and Hebrew (RTL)** out of the box. Add a language in `src/i18n.ts`.
-- **Share my city.** One click exports a PNG of your skyline with your bot names. It never includes request contents.
+| Platform | How | |
+|---|---|---|
+| OpenAI Agents SDK / Assistants | function tool or remote MCP | [guide](docs/INTEGRATIONS.md#openai-agents-sdk--assistants) |
+| ChatGPT GPTs | Action (OpenAPI schema) | [guide](docs/INTEGRATIONS.md#chatgpt-gpts-actions) |
+| Grok Bot | paste prompt → routine | [guide](docs/INTEGRATIONS.md#grok-bot) |
+| Claude / MCP clients | `/mcp` → `city_report` tool | [guide](docs/INTEGRATIONS.md#claude--any-mcp-client) |
+| OpenClaw | MCP or curl hook | [guide](docs/INTEGRATIONS.md#openclaw) |
+| Muse | webhook step | [guide](docs/INTEGRATIONS.md#muse) |
+| LangChain / LangGraph | callback handler or MCP adapter | [guide](docs/INTEGRATIONS.md#langchain) |
+| CrewAI | `step_callback` | [guide](docs/INTEGRATIONS.md#crewai) |
+| n8n | HTTP Request node | [guide](docs/INTEGRATIONS.md#n8n) |
+| Anything with HTTP | `POST /api/v1/agents` | [guide](docs/INTEGRATIONS.md#custom--anything-else) |
+
+## How the city works
+
+- **Districts** per platform, neutral colors, no logos. **Tower height** grows with the last 24 h of activity.
+- **Live feed** of joins, status changes, errors and **hand-offs** (`"handoff":{"to":"<id>"}` draws an arc).
+- **Health:** stale after 15 min without a report, offline after 6 h.
+- `?demo` shows simulated agents; the original Grok Bot Town Hall with approvals lives at `?classic`.
+- Auth: per-agent join tokens (hashed in KV) or a shared `CITY_KEY` secret. Old `/api/status` bot tokens keep working.
+
+## Develop
+
+```bash
+npm install && npm run dev     # app + worker
+npm test && npm run build
+python3 scripts/video.py       # re-record docs/hero-multi.mp4/.gif (needs vite preview on :4173)
+```
+
+---
+
+# Classic mode (Grok Bot + Town Hall approvals)
+
+Open `/?classic`. The original setup below still works unchanged.
 
 ## Honest limits
 

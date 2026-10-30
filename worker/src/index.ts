@@ -4,6 +4,10 @@
  *   POST /api/status    bot -> city   (Authorization: Bearer <bot token>)
  *   GET  /api/state     page polls    (owner session)
  *   POST /api/decision  owner -> bot  (owner session; forwarded to the bot's webhook)
+ *   POST /api/v1/agents  universal: any agent, any platform (Bearer CITY_KEY | invite token | bot token)
+ *   POST /mcp           MCP (Streamable HTTP, JSON-RPC) with a `city_report` tool
+ *   POST /api/invites   owner creates a join token / invite link
+ *   GET  /api/city      owner: agents + districts + feed
  *   POST /api/login | /api/logout | GET /api/me
  *
  * Secrets (never committed; `wrangler secret put ...`):
@@ -20,6 +24,8 @@ export interface Env {
   SESSION_SECRET?: string;
   BOTS?: string;
   ACCESS_EMAIL?: string;
+  /** Optional shared city key: any agent can join with `Authorization: Bearer <CITY_KEY>`. */
+  CITY_KEY?: string;
   ASSETS?: { fetch: (r: Request) => Promise<Response> };
 }
 
@@ -137,14 +143,24 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   const path = url.pathname;
   const bots = parseBots(env);
 
+  if (path === '/mcp') return mcp(req, env, bots);
   if (!path.startsWith('/api/')) {
     return env.ASSETS ? env.ASSETS.fetch(req) : new Response('Not found', { status: 404 });
+  }
+
+  if (req.method === 'OPTIONS' && (path === '/mcp' || path.startsWith('/api/v1/') || path === '/api/status')) {
+    return new Response(null, { status: 204, headers: CORS });
+  }
+  if (path === '/mcp') return mcp(req, env, bots);
+  if ((path === '/api/v1/agents' || path === '/api/v1/report') && req.method === 'POST') {
+    return universalReport(req, env, bots);
   }
 
   // ---- bot -> city
   if (path === '/api/status' && req.method === 'POST') {
     const id = botFromBearer(req, bots);
-    if (!id) return json({ error: 'unauthorized' }, 401);
+    // Universal payloads (with an `agent` object) or non-legacy keys go to the universal path.
+    if (!id) return universalReport(req, env, bots);
     let body: any;
     try { body = await readJson(req); } catch { return json({ error: 'invalid json' }, 400); }
     const clean = sanitizeStatus(body);
@@ -159,6 +175,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       updated_at: now, first_seen: prev?.first_seen ?? now,
     };
     await env.CITY_KV.put(`bot:${id}`, JSON.stringify(state));
+    await upsertAgent(env, { id, name: state.name, platform: body.platform ? normPlatform(body.platform) : 'grokbot', status: state.status, task: state.message, pending: state.pending.length });
     return json({ ok: true, pending: state.pending.length });
   }
 
@@ -192,6 +209,22 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     }
     const log = ((await env.CITY_KV.get('log', 'json')) as unknown[] | null) ?? [];
     return json({ bots: out, log, generated_at: new Date().toISOString() });
+  }
+
+  if (path === '/api/city' && req.method === 'GET') {
+    if (!(await isOwner(req, env))) return json({ error: 'unauthorized' }, 401);
+    return json(await cityState(env));
+  }
+  if (path === '/api/invites' && req.method === 'POST') {
+    if (!sameOrigin(req)) return json({ error: 'bad origin' }, 403);
+    if (!(await isOwner(req, env))) return json({ error: 'unauthorized' }, 401);
+    let body: any = {};
+    try { body = await readJson(req); } catch { /* empty body ok */ }
+    const token = 'oc_' + randomToken();
+    const invite: Invite = { label: str(body?.label, 60) || 'invite', platform: normPlatform(body?.platform), created_at: new Date().toISOString() };
+    await env.CITY_KV.put(`invite:${await sha(token)}`, JSON.stringify(invite));
+    const origin = url.origin;
+    return json({ token, ...invite, endpoint: `${origin}/api/v1/agents`, mcp: `${origin}/mcp`, curl: curlFor(origin, token, invite.platform), prompt: promptFor(origin, token) });
   }
 
   if (path === '/api/decision' && req.method === 'POST') {
@@ -232,6 +265,163 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   }
 
   return json({ error: 'not found' }, 404);
+}
+
+// ====================================================================== universal agents
+export const PLATFORMS = ['openai', 'grokbot', 'claude', 'openclaw', 'muse', 'langchain', 'crewai', 'n8n', 'gemini', 'custom'] as const;
+export type Platform = (typeof PLATFORMS)[number];
+const ALIASES: Record<string, Platform> = {
+  gpt: 'openai', chatgpt: 'openai', 'openai-agents': 'openai', assistants: 'openai', grok: 'grokbot', 'grok-bot': 'grokbot', xai: 'grokbot',
+  anthropic: 'claude', mcp: 'claude', openclow: 'openclaw', 'open-claw': 'openclaw', langgraph: 'langchain', crew: 'crewai', google: 'gemini',
+};
+export function normPlatform(v: unknown): Platform {
+  const k = typeof v === 'string' ? v.toLowerCase().trim().replace(/\s+/g, '-') : '';
+  return (PLATFORMS as readonly string[]).includes(k) ? (k as Platform) : ALIASES[k] ?? 'custom';
+}
+export interface Agent {
+  id: string; name: string; platform: Platform; status: 'ok' | 'busy' | 'error' | 'idle';
+  task?: string; metrics?: Record<string, number>; pending?: number;
+  events: number[]; first_seen: string; updated_at: string;
+}
+export interface FeedItem { at: string; agent: string; name: string; platform: Platform; kind: 'join' | 'status' | 'handoff' | 'error'; text?: string; to?: string }
+interface Invite { label: string; platform: Platform; created_at: string }
+const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization, content-type, mcp-session-id, mcp-protocol-version', 'access-control-allow-methods': 'POST, OPTIONS' };
+const STALE_MS = 15 * 60_000, OFFLINE_MS = 6 * 3600_000;
+
+function randomToken() { const b = new Uint8Array(18); crypto.getRandomValues(b); return [...b].map((x) => x.toString(16).padStart(2, '0')).join(''); }
+async function sha(s: string) { const d = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(s))); return [...d].map((x) => x.toString(16).padStart(2, '0')).join(''); }
+const slugId = (v: unknown) => (typeof v === 'string' ? v.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) : '');
+
+/** Who is calling? Returns a namespace + default platform, or null. */
+export async function authAgent(req: Request, env: Env, bots: Record<string, BotConfig>): Promise<{ via: string; platform?: Platform; botId?: string } | null> {
+  const m = /^Bearer\s+(.+)$/i.exec(req.headers.get('authorization') || '');
+  if (!m) return null;
+  const tok = m[1].trim();
+  if (env.CITY_KEY && safeEqual(tok, env.CITY_KEY)) return { via: 'key' };
+  for (const [id, b] of Object.entries(bots)) if (b.token && safeEqual(tok, b.token)) return { via: 'bot', botId: id };
+  if (tok.startsWith('oc_')) {
+    const inv = (await env.CITY_KV.get(`invite:${await sha(tok)}`, 'json')) as Invite | null;
+    if (inv) return { via: 'invite', platform: inv.platform };
+  }
+  return null;
+}
+
+export function sanitizeAgent(body: any, fallback: { id?: string; platform?: Platform } = {}) {
+  if (!body || typeof body !== 'object') return null;
+  const a = body.agent && typeof body.agent === 'object' ? body.agent : body;
+  const id = slugId(a.id ?? body.agent_id ?? a.name ?? fallback.id);
+  if (!id) return null;
+  const status = ['ok', 'busy', 'error', 'idle'].includes(body.status) ? body.status : body.status === 'working' ? 'busy' : body.status === 'done' ? 'ok' : 'ok';
+  const metrics: Record<string, number> = {};
+  if (body.metrics && typeof body.metrics === 'object') {
+    for (const [k, v] of Object.entries(body.metrics).slice(0, 8)) if (typeof v === 'number' && isFinite(v)) metrics[k.slice(0, 24)] = v;
+  }
+  const h = body.handoff && typeof body.handoff === 'object' ? body.handoff : null;
+  return {
+    id, name: str(a.name, 60) || id,
+    platform: a.platform != null || body.platform != null ? normPlatform(a.platform ?? body.platform) : fallback.platform ?? 'custom',
+    status: status as Agent['status'], task: str(body.task ?? body.message, 200), metrics,
+    handoff: h ? { to: slugId(h.to), note: str(h.note ?? h.task, 140) } : undefined,
+  };
+}
+
+async function upsertAgent(env: Env, a: { id: string; name: string; platform: Platform; status: Agent['status']; task?: string; metrics?: Record<string, number>; pending?: number; handoff?: { to: string; note?: string } }) {
+  const prev = (await env.CITY_KV.get(`agent:${a.id}`, 'json')) as Agent | null;
+  const nowMs = Date.now(), now = new Date(nowMs).toISOString();
+  const events = (prev?.events ?? []).filter((t) => nowMs - t < 24 * 3600_000).concat(nowMs).slice(-200);
+  const agent: Agent = { id: a.id, name: a.name, platform: a.platform, status: a.status, task: a.task, metrics: a.metrics && Object.keys(a.metrics).length ? a.metrics : prev?.metrics, pending: a.pending ?? prev?.pending, events, first_seen: prev?.first_seen ?? now, updated_at: now };
+  await env.CITY_KV.put(`agent:${a.id}`, JSON.stringify(agent));
+  const index = ((await env.CITY_KV.get('agents', 'json')) as string[] | null) ?? [];
+  if (!index.includes(a.id)) { index.push(a.id); await env.CITY_KV.put('agents', JSON.stringify(index.slice(-500))); }
+  const feed = ((await env.CITY_KV.get('feed', 'json')) as FeedItem[] | null) ?? [];
+  const base = { at: now, agent: a.id, name: a.name, platform: a.platform };
+  if (!prev) feed.unshift({ ...base, kind: 'join', text: a.task });
+  if (a.handoff?.to) feed.unshift({ ...base, kind: 'handoff', to: a.handoff.to, text: a.handoff.note });
+  else if (prev && (prev.task !== a.task || prev.status !== a.status)) feed.unshift({ ...base, kind: a.status === 'error' ? 'error' : 'status', text: a.task });
+  await env.CITY_KV.put('feed', JSON.stringify(feed.slice(0, 100)));
+  return { agent, isNew: !prev };
+}
+
+async function universalReport(req: Request, env: Env, bots: Record<string, BotConfig>): Promise<Response> {
+  const who = await authAgent(req, env, bots);
+  if (!who) return json({ error: 'unauthorized', hint: 'Send Authorization: Bearer <join token>. Create one in your city: Connect an agent.' }, 401, CORS);
+  let body: any;
+  try { body = await readJson(req); } catch { return json({ error: 'invalid json' }, 400, CORS); }
+  const clean = sanitizeAgent(body, { id: who.botId, platform: who.platform ?? (who.via === 'bot' ? 'grokbot' : undefined) });
+  if (!clean) return json({ error: 'invalid body', hint: 'Minimum: {"agent":{"id":"my-bot","platform":"openai"},"status":"busy","task":"..."}' }, 400, CORS);
+  const { isNew } = await upsertAgent(env, clean);
+  return json({ ok: true, id: clean.id, platform: clean.platform, joined: isNew }, 200, CORS);
+}
+
+export function agentHealth(a: Agent, now = Date.now()): 'live' | 'stale' | 'offline' {
+  const age = now - new Date(a.updated_at).getTime();
+  return age > OFFLINE_MS ? 'offline' : age > STALE_MS ? 'stale' : 'live';
+}
+
+export async function cityState(env: Env, now = Date.now()) {
+  const ids = ((await env.CITY_KV.get('agents', 'json')) as string[] | null) ?? [];
+  const agents: (Agent & { health: string; activity: number })[] = [];
+  for (const id of ids) {
+    const a = (await env.CITY_KV.get(`agent:${id}`, 'json')) as Agent | null;
+    if (a) agents.push({ ...a, events: [], health: agentHealth(a, now), activity: a.events.filter((t) => now - t < 24 * 3600_000).length });
+  }
+  const districts: Record<string, number> = {};
+  for (const a of agents) districts[a.platform] = (districts[a.platform] ?? 0) + 1;
+  const feed = ((await env.CITY_KV.get('feed', 'json')) as FeedItem[] | null) ?? [];
+  return { agents, districts, feed, generated_at: new Date(now).toISOString() };
+}
+
+export function curlFor(origin: string, token: string, platform: string) {
+  return `curl -X POST ${origin}/api/v1/agents -H "Authorization: Bearer ${token}" -H "content-type: application/json" -d '{"agent":{"id":"my-agent","name":"My Agent","platform":"${platform}"},"status":"busy","task":"Hello city"}'`;
+}
+export function promptFor(origin: string, token: string) {
+  return `You are now a citizen of my OVXA City. Whenever you start, finish, hand off or get stuck on a task, send one HTTP request:
+POST ${origin}/api/v1/agents
+Authorization: Bearer ${token}
+Content-Type: application/json
+{"agent":{"id":"<short-id>","name":"<your name>","platform":"<openai|grokbot|claude|openclaw|muse|langchain|crewai|n8n|custom>"},"status":"<busy|ok|error|idle>","task":"<one line, no secrets>","handoff":{"to":"<other agent id>","note":"<optional>"}}
+Never include passwords, tokens or personal data in "task". Report now with status "ok" and task "Joined the city".`;
+}
+
+// ---------------------------------------------------------------- MCP (Streamable HTTP, stateless JSON-RPC)
+const MCP_TOOL = {
+  name: 'city_report',
+  description: 'Report this agent\'s status to OVXA City (a live map of all your AI agents). Call when you start, finish, hand off, or hit an error.',
+  inputSchema: {
+    type: 'object', required: ['id', 'status'],
+    properties: {
+      id: { type: 'string', description: 'Stable short agent id, e.g. "research-bot"' },
+      name: { type: 'string' }, platform: { type: 'string', enum: [...PLATFORMS] },
+      status: { type: 'string', enum: ['busy', 'ok', 'error', 'idle'] },
+      task: { type: 'string', description: 'One line. No secrets.' },
+      handoff_to: { type: 'string', description: 'Agent id you are handing work to' },
+      metrics: { type: 'object', additionalProperties: { type: 'number' } },
+    },
+  },
+};
+async function mcp(req: Request, env: Env, bots: Record<string, BotConfig>): Promise<Response> {
+  if (req.method !== 'POST') return json({ error: 'POST JSON-RPC to this endpoint' }, 405, CORS);
+  const who = await authAgent(req, env, bots);
+  if (!who) return json({ jsonrpc: '2.0', id: null, error: { code: -32001, message: 'unauthorized' } }, 401, CORS);
+  let msg: any;
+  try { msg = await readJson(req); } catch { return json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } }, 400, CORS); }
+  const reply = (result: unknown) => json({ jsonrpc: '2.0', id: msg.id ?? null, result }, 200, CORS);
+  if (msg.id === undefined || msg.id === null) return new Response(null, { status: 202, headers: CORS }); // notification
+  switch (msg.method) {
+    case 'initialize':
+      return reply({ protocolVersion: msg.params?.protocolVersion ?? '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'ovxa-city', version: '0.2.0' } });
+    case 'ping': return reply({});
+    case 'tools/list': return reply({ tools: [MCP_TOOL] });
+    case 'tools/call': {
+      if (msg.params?.name !== 'city_report') return json({ jsonrpc: '2.0', id: msg.id, error: { code: -32602, message: 'unknown tool' } }, 200, CORS);
+      const a = msg.params.arguments ?? {};
+      const clean = sanitizeAgent({ agent: { id: a.id, name: a.name, platform: a.platform ?? who.platform ?? 'claude' }, status: a.status, task: a.task, metrics: a.metrics, handoff: a.handoff_to ? { to: a.handoff_to } : undefined });
+      if (!clean) return reply({ isError: true, content: [{ type: 'text', text: 'id is required' }] });
+      await upsertAgent(env, clean);
+      return reply({ content: [{ type: 'text', text: `Reported ${clean.name} (${clean.platform}) as ${clean.status}.` }] });
+    }
+    default: return json({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: 'method not found' } }, 200, CORS);
+  }
 }
 
 export default { fetch: handle };
