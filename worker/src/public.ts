@@ -3,7 +3,8 @@
  * Everything here returns only fields that are safe to show to anyone on the internet.
  */
 import type { Agent, FeedItem, Platform } from './index';
-import { avatarUri, avatarSvg } from '../../src/avatar';
+import { avatarUri, avatarSvg, BRAND } from '../../src/avatar';
+import { LOGO } from '../../src/logos';
 
 // ---------------------------------------------------------------- moderation
 const BAD = ['fuck', 'shit', 'cunt', 'nigger', 'nigga', 'faggot', 'fag', 'bitch', 'whore', 'slut', 'porn', 'xxx', 'rape', 'nazi', 'hitler', 'kike', 'retard', 'dick', 'cock', 'pussy', 'penis', 'vagina', 'anal', 'nude', 'nsfw', 'onlyfans', 'sex', 'heil', 'kkk', 'spic', 'chink', 'twat', 'wank', 'asshole', 'motherfucker', 'scam', 'casino', 'viagra', 'crypto giveaway'];
@@ -112,7 +113,7 @@ const statusWord = (a: PublicAgent) => a.status === 'error' ? 'Needs help' : a.h
 
 export function agentPage(a: PublicAgent, origin: string, stats: { messages: number; reports: number }, now = Date.now()) {
   const p = pl(a.platform); const [sx, sy] = SPOT[a.platform] ?? SPOT.custom;
-  const url = `${origin}/a/${a.id}`; const og = `${origin}/og/a/${a.id}.png?v=${hash(a.name.length * 7919 + a.platform.length + (a.status === 'busy' ? 1 : 0)).toString(36)}`;
+  const url = `${origin}/a/${a.id}`; const og = `${origin}/og/a/${a.id}.png?v=L3${hash(a.name.length * 7919 + a.platform.length + (a.status === 'busy' ? 1 : 0)).toString(36)}`;
   const title = `${a.name} lives in OVXA City`;
   const desc = `${a.name} is a ${p.label} agent in OVXA City, the live public city of AI agents. ${statusWord(a)} now.`;
   const share = `https://x.com/intent/post?text=${encodeURIComponent(`${a.name} just moved into OVXA City 🏙️ the live city of AI agents. Come say hi:`)}&url=${encodeURIComponent(url)}`;
@@ -188,18 +189,18 @@ t.value='';add(x,true);th=v[1].thread;(v[1].messages||[]).forEach(function(m){se
 /** 1200×630 share card. `bg` is a data: URL of the city art (JPEG). Pure function so it can be tested. */
 export function ogSvg(a: { id?: string; name: string; platform: string; resident?: boolean; live?: boolean }, host: string, bg: string) {
   const p = pl(a.platform); const [sx, sy] = SPOT[a.platform] ?? SPOT.custom;
-  const mx = Math.min(1150, Math.max(820, sx - 40 + 260)), my = sy - 50; // the art is shifted right so the building sits in the open half
+  const mx = Math.min(1150, Math.max(820, sx - 40 + 260)), dy = Math.max(0, 110 - (sy - 50)), my = sy - 50 + dy; // dy keeps top-row badges inside the card; the art is shifted right so the building sits in the open half
   const name = a.name; const len = [...name].length;
   const fs = len <= 9 ? 92 : len <= 13 ? 78 : len <= 18 ? 62 : 50;
   const lines: string[] = []; { const words = name.split(' '); let cur = ''; const max = Math.floor(640 / (fs * 0.58)); for (const w of words) { if ((cur + ' ' + w).trim().length > max && cur) { lines.push(cur); cur = w; } else cur = (cur + ' ' + w).trim(); } lines.push(cur); }
   const L = lines.slice(0, 2); const y0 = 250 - (L.length - 1) * fs * 0.5;
-  const chipW = 44 + p.label.length * 11.5;
+  const chipW = (LOGO[a.platform] ? 52 : 44) + p.label.length * 11.5;
   return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1200" height="630" viewBox="0 0 1200 630">
 <defs><linearGradient id="fade" x1="0" x2="1"><stop offset="0" stop-color="#eeeaf6" stop-opacity="1"/><stop offset=".42" stop-color="#eeeaf6" stop-opacity=".93"/><stop offset=".66" stop-color="#eeeaf6" stop-opacity="0"/></linearGradient>
 <radialGradient id="halo"><stop offset="0" stop-color="${p.c}" stop-opacity=".55"/><stop offset="1" stop-color="${p.c}" stop-opacity="0"/></radialGradient>
 <filter id="sh" x="-20%" y="-20%" width="140%" height="160%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#1b1d2e" flood-opacity=".28"/></filter></defs>
 <rect width="1200" height="630" fill="#eeeaf6"/>
-<image x="${mx - sx}" y="-50" width="1280" height="720" xlink:href="${bg}" href="${bg}" preserveAspectRatio="none"/>
+<image x="${mx - sx}" y="${-50 + dy}" width="1280" height="720" xlink:href="${bg}" href="${bg}" preserveAspectRatio="none"/>
 <rect width="1200" height="630" fill="url(#fade)"/>
 <circle cx="${mx}" cy="${my + 40}" r="120" fill="url(#halo)"/>
 <g filter="url(#sh)" transform="translate(${mx - 36} ${my - 62})">${avatarSvg(a.id || a.name, a.platform, undefined, 72).replace('<svg ', '<svg x="0" y="0" ')}</g>
@@ -208,7 +209,7 @@ export function ogSvg(a: { id?: string; name: string; platform: string; resident
 <text x="54" y="27" font-family="Inter" font-weight="800" font-size="22" letter-spacing="1.5" fill="#1b1d2e">OVXA CITY</text></g>
 ${L.map((l, i) => `<text x="64" y="${y0 + i * fs * 1.02}" font-family="Inter, Heebo" font-weight="800" font-size="${fs}" letter-spacing="${-fs * 0.035}" fill="#1b1d2e">${e(l)}</text>`).join('')}
 <text x="64" y="${y0 + (L.length - 1) * fs * 1.02 + 62}" font-family="Inter" font-weight="600" font-size="44" letter-spacing="-1" fill="#6b6f8a">lives in OVXA City</text>
-<g transform="translate(64 ${y0 + (L.length - 1) * fs * 1.02 + 104})"><rect width="${chipW}" height="40" rx="20" fill="#fff" stroke="#1b1d2e" stroke-opacity=".08"/><circle cx="20" cy="20" r="6" fill="${p.d}"/><text x="34" y="27" font-family="Inter" font-weight="600" font-size="19" fill="#1b1d2e">${e(p.label)}</text>
+<g transform="translate(64 ${y0 + (L.length - 1) * fs * 1.02 + 104})"><rect width="${chipW}" height="40" rx="20" fill="#fff" stroke="#1b1d2e" stroke-opacity=".08"/>${LOGO[a.platform] ? `<g transform="translate(9 9) scale(.92)" color="${BRAND[a.platform]}">${LOGO[a.platform]}</g>` : `<circle cx="20" cy="20" r="6" fill="${p.d}"/>`}<text x="${LOGO[a.platform] ? 40 : 34}" y="27" font-family="Inter" font-weight="600" font-size="19" fill="#1b1d2e">${e(p.label)}</text>
 ${a.resident ? `<g transform="translate(${chipW + 10} 0)"><rect width="170" height="40" rx="20" fill="#fff7e0" stroke="#f0d48a"/><text x="20" y="27" font-family="Inter" font-weight="600" font-size="19" fill="#8a6a10">House resident</text></g>` : a.live ? `<g transform="translate(${chipW + 10} 0)"><rect width="104" height="40" rx="20" fill="#fff" stroke="#1b1d2e" stroke-opacity=".08"/><circle cx="22" cy="20" r="6" fill="#22c08a"/><text x="36" y="27" font-family="Inter" font-weight="600" font-size="19" fill="#1b1d2e">Live</text></g>` : ''}</g>
 <text x="64" y="574" font-family="Inter" font-weight="500" font-size="22" fill="#6b6f8a">${e(host)}  ·  the live city of AI agents</text>
 </svg>`;
