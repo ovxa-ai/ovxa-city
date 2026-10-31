@@ -4,6 +4,7 @@ import { plat, PLATFORM, healthOf, type CityAgent, type FeedItem } from './layou
 import { SIM_ROSTER, simTask } from './sim';
 import { avatarUri, glyph } from './avatar';
 import { agentPrompt, mcpLinks } from './links';
+import { openOffice, officeOpen, closeOffice } from './office';
 const avOf = (a: { id: string; platform: string; avatar?: string }, size = 32) => avatarUri(a.id, a.platform, a.avatar, size);
 const avImg = (a: { id: string; platform: string; avatar?: string }, cls = '', size = 32) => `<img class="avi ${cls}" alt="" src="${avOf(a, size)}" draggable="false">`;
 
@@ -35,6 +36,8 @@ export async function start() {
   $('#app').innerHTML = shell();
   bind();
   if (mode === 'live' || mode === 'public') { await pull(); setInterval(pull, mode === 'public' ? 5000 : 4000); } else simulate();
+  const fromHash = () => { const oh = /^#office=([a-z]+)$/.exec(location.hash); if (oh && PLATFORM[oh[1]]) office(oh[1]); else if (!location.hash && officeOpen()) closeOffice(); };
+  fromHash(); addEventListener('hashchange', fromHash);
   fitStage();
   intro();
   if (new URLSearchParams(location.search).has('join')) setTimeout(openConnect, RM ? 0 : 1200);
@@ -308,12 +311,15 @@ function stageSetup() {
     const el = document.createElement('div');
     el.className = 'pin empty'; el.dataset.p = k;
     el.style.setProperty('--c', p.top);
-    el.innerHTML = `<div class="card"><span class="nm"><i>${glyph(k, 13, true)}</i>${esc(p.label)}</span><span class="av"></span><span class="ct"></span></div><span class="stem"></span>`;
-    el.querySelector('.card')!.addEventListener('click', () => { const top = agents.filter((a) => a.platform === k).sort((x, y) => (y.activity ?? 0) - (x.activity ?? 0))[0]; if (top) open(top.id); });
+    el.innerHTML = `<div class="card"><span class="nm"><i>${glyph(k, 13, true)}</i>${esc(p.label)}<em class="go" aria-hidden="true">Enter ›</em></span><span class="av"></span><span class="ct"></span></div><span class="stem"></span>`;
+    const card = el.querySelector<HTMLElement>('.card')!; card.title = `Enter the ${p.label} office`; card.setAttribute('role', 'button'); card.tabIndex = 0;
+    card.addEventListener('click', () => office(k)); card.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === card) office(k); });
     $('#pins').appendChild(el); pills.set(k, el);
   }
 }
 
+/** Clicking a building opens its office. */
+function office(k: string) { openOffice(k, { mode, agents: () => agents, feed: () => feed, chat: (id) => openChat(id), toast }); }
 /** Clicking an agent opens the Talk drawer (owner chat, or a public wave). */
 function open(id: string) { openChat(id); }
 

@@ -114,7 +114,7 @@ describe('MCP bus tools', () => {
     await report(a.token, 'cursor-agent'); await report(b.token, 'gpt');
     const rpc = (tok: string, method: string, params: unknown) => call('/mcp', { jsonrpc: '2.0', id: 1, method, params }, { authorization: `Bearer ${tok}` });
     const names = (await rpc(a.token, 'tools/list', {})).body.result.tools.map((t: any) => t.name);
-    expect(names).toEqual(['city_report', 'city_send_message', 'city_read_inbox', 'city_list_agents']);
+    expect(names).toEqual(['city_report', 'city_send_message', 'city_read_inbox', 'city_list_agents', 'city_list_tasks', 'city_create_task', 'city_update_task']);
     expect((await rpc(a.token, 'tools/call', { name: 'city_list_agents', arguments: {} })).body.result.content[0].text).toContain('gpt');
     expect((await rpc(a.token, 'tools/call', { name: 'city_send_message', arguments: { to: 'gpt', text: 'ping' } })).body.result.isError).toBe(false);
     expect((await rpc(b.token, 'tools/call', { name: 'city_read_inbox', arguments: {} })).body.result.content[0].text).toContain('ping');
