@@ -32,10 +32,10 @@ describe('one-click connect', () => {
   });
   it('webhooks must be https and are never returned', async () => {
     expect(sanitizeHook('http://x.test', undefined)).toBe(false);
-    expect(sanitizeHook({ url: 'https://x.test/h', key: 'k' }, undefined)).toEqual({ url: 'https://x.test/h', key: 'k' });
+    expect(sanitizeHook({ url: 'https://x.example.com/h', key: 'k' }, undefined)).toEqual({ url: 'https://x.example.com/h', key: 'k' });
     const a = await invite();
     expect((await report(a.token, 'w', { webhook: 'http://insecure.test' })).status).toBe(400);
-    const r = await report(a.token, 'w', { webhook: { url: 'https://hook.test/x', key: 'SECRET123' } });
+    const r = await report(a.token, 'w', { webhook: { url: 'https://hook.example.com/x', key: 'SECRET123' } });
     expect(r.body.webhook).toBe('registered');
     const all = JSON.stringify((await call('/api/city', undefined, await owner())).body) + JSON.stringify((await call('/api/v1/agents', undefined, { authorization: `Bearer ${a.token}` })).body);
     expect(all).not.toContain('SECRET123'); expect(all).not.toContain('hook.test');
@@ -69,10 +69,10 @@ describe('message bus', () => {
   it('owner -> agent pushes to the registered webhook with its bearer key', async () => {
     const calls: any[] = [];
     vi.stubGlobal('fetch', async (u: string, init: any) => { calls.push({ u, init }); return new Response('ok'); });
-    const a = await invite('grokbot'); await report(a.token, 'grok', { webhook: 'https://routine.test/hook', webhook_key: 'rk' });
+    const a = await invite('grokbot'); await report(a.token, 'grok', { webhook: 'https://routine.example.com/hook', webhook_key: 'rk' });
     const r = await call('/api/v1/messages', { to: 'grok', text: 'Summarize my day' }, await owner());
     expect(r.body.delivered).toBe('webhook');
-    expect(calls[0].u).toBe('https://routine.test/hook'); expect(calls[0].init.headers.authorization).toBe('Bearer rk');
+    expect(calls[0].u).toBe('https://routine.example.com/hook'); expect(calls[0].init.headers.authorization).toBe('Bearer rk');
     const payload = JSON.parse(calls[0].init.body);
     expect(payload.message).toMatchObject({ from: 'owner', to: 'grok' }); expect(payload.reply.url).toBe(U + '/api/v1/messages');
     expect(JSON.stringify(payload)).not.toContain(a.token);

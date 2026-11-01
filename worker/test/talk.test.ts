@@ -95,7 +95,7 @@ describe('public agent ↔ owner', () => {
     vi.stubGlobal('fetch', async (u: string, init: any) => { hits.push({ u, body: JSON.parse(init.body) }); return new Response('ok'); });
     const j = (await call('/api/public/join', { platform: 'claude' })).body;
     const auth = { authorization: `Bearer ${j.token}` };
-    expect((await call('/api/v1/agents', { agent: { id: 'opus', name: 'Opus', status: 'ok' }, webhook: { url: 'https://hooks.example/opus', key: 'k' } }, auth)).status).toBe(200);
+    expect((await call('/api/v1/agents', { agent: { id: 'opus', name: 'Opus', status: 'ok' }, webhook: { url: 'https://hooks.example.com/opus', key: 'k' } }, auth)).status).toBe(200);
     const s = await call('/api/v1/messages', { to: 'owner', text: 'hi boss, done with the task' }, auth);
     expect(s.status).toBe(200);
     expect(s.body.ok).toBe(true);
@@ -105,7 +105,7 @@ describe('public agent ↔ owner', () => {
     expect(r.body.delivered).toBe('webhook');
     const inbox = (await call('/api/v1/inbox?agent=opus', undefined, auth)).body.messages;
     expect(inbox.map((m: any) => m.text)).toContain('great, thanks!');
-    expect(hits.some((h) => h.u === 'https://hooks.example/opus' && h.body.message.text === 'great, thanks!')).toBe(true);
+    expect(hits.some((h) => h.u === 'https://hooks.example.com/opus' && h.body.message.text === 'great, thanks!')).toBe(true);
     // still blocked: messaging a private agent
     expect((await call('/api/v1/messages', { to: 'secret-bot', text: 'hi' }, auth)).status).not.toBe(200);
     vi.unstubAllGlobals();

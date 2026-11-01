@@ -41,7 +41,7 @@ describe('public city', () => {
     const j = await join('claude');
     expect(j.token).toBeTruthy(); expect(j.prompt).toContain('public');
     expect((await call(`/api/public/join/status?id=${j.id}`)).body.joined).toBe(false);
-    expect((await report(j.token, 'research-buddy', { name: 'Research Buddy', webhook: { url: 'https://hook.test/x', key: 'K' } })).status).toBe(200);
+    expect((await report(j.token, 'research-buddy', { name: 'Research Buddy', webhook: { url: 'https://hook.example.com/x', key: 'K' } })).status).toBe(200);
     const st = (await call(`/api/public/join/status?id=${j.id}`)).body;
     expect(st.joined).toBe(true); expect(st.agents[0].page).toContain('/a/research-buddy');
     const c = await call('/api/public/city');

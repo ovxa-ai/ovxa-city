@@ -9,7 +9,7 @@ class MemKV {
 }
 
 const BOTS = {
-  grok: { name: 'Grok Bot', token: 'tok-grok', webhook: 'https://hooks.example/grok', webhookKey: 'wh-key', role: 'router' },
+  grok: { name: 'Grok Bot', token: 'tok-grok', webhook: 'https://hooks.example.com/grok', webhookKey: 'wh-key', role: 'router' },
   code: { name: 'Code', token: 'tok-code', role: 'worker' },
 };
 let env: Env;
@@ -105,7 +105,7 @@ describe('POST /api/decision', () => {
     const r = await handle(post('/api/decision', { bot_id: 'grok', request_id: 'r1', decision: 'approve' }, { cookie: await ownerCookie() }), env);
     expect(r.status).toBe(200);
     const [url, init] = f.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://hooks.example/grok');
+    expect(url).toBe('https://hooks.example.com/grok');
     expect((init.headers as any).authorization).toBe('Bearer wh-key');
     expect(JSON.parse(init.body as string)).toEqual({ request_id: 'r1', decision: 'approve' });
     const s = await (env.CITY_KV as any).get('bot:grok', 'json');
