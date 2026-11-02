@@ -79,9 +79,9 @@ def chime(g=0.13):
 def pop(g=0.2):
     n=int(0.15*SR); tt=np.arange(n)/SR; f=300+900*np.exp(-tt*40)
     return np.sin(2*np.pi*np.cumsum(f)/SR)*np.exp(-tt*28)*g
-sfx(click(),2.52,1.1); sfx(whoosh(0.55,True),2.35); sfx(click(0.18),4.30,1.3); sfx(tick(),6.47,1.35)
-sfx(chime(),10.40,1.3); sfx(click(0.18),10.72,0.7); sfx(whoosh(0.45,False,0.16),10.7)
-sfx(click(),11.50,1.4); sfx(pop(),11.57); sfx(click(0.2),13.15,1.0); sfx(pop(0.22),13.22); sfx(tick(3200,0.08),13.32)
+sfx(click(),2.65,1.1); sfx(whoosh(0.55,True),2.48); sfx(click(0.18),4.66,1.3); sfx(tick(),6.73,1.35)
+sfx(chime(),10.73,1.3); sfx(click(0.18),11.2,0.7); sfx(whoosh(0.45,False,0.16),11.18)
+sfx(click(),11.93,1.4); sfx(pop(),12.0); sfx(click(0.2),13.5,1.0); sfx(pop(0.22),13.57); sfx(tick(3200,0.08),13.67)
 out=mus+S
 out=out/np.max(np.abs(out))*0.89
 w=wave.open('/workspace/audio/mix.wav','wb'); w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR)
